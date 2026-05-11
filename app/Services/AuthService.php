@@ -12,9 +12,7 @@ use Illuminate\Support\Str;
 
 class AuthService
 {
-    
-    // تسجيل الدخول 
-     
+    // تسجيل الدخول
     public function login(string $email, string $password, array $deviceInfo = []): array
     {
         $user = User::where('email', $email)->first();
@@ -22,7 +20,7 @@ class AuthService
         if (!$user) {
             //  تسجيل محاولة فاشلة (مستخدم غير موجود)
             LoginHistory::create([
-                'user_id' => 0,
+                'user_id' => null,
                 'ip_address' => request()->ip(),
                 'user_agent' => request()->userAgent(),
                 'device_type' => $deviceInfo['device_type'] ?? 'unknown',
@@ -34,6 +32,7 @@ class AuthService
                 'message' => 'البريد الإلكتروني أو كلمة المرور غير صحيحة'
             ];
         }
+
 
         // التحقق من قفل الحساب
         if ($user->isLocked()) {
@@ -56,9 +55,17 @@ class AuthService
         if (!$user->is_active) {
             return [
                 'success' => false,
-                'message' => 'الحساب غير مفعل. في انتظار موافقة الإدارة'
+                'message' => 'الحساب غير مقبول حتى الان. في انتظار موافقة الإدارة'
             ];
         }
+
+        if(!$user->isVerified()){
+            return [
+                'success' => false,
+                'message' => 'لم تقم بتفعيل حسابك بعد'
+            ];
+        }
+
 
         // التحقق من كلمة المرور
         if (!Hash::check($password, $user->password)) {
@@ -136,17 +143,16 @@ class AuthService
         ];
     }
 
-    
+
     //  تسجيل الخروج
-    
+
     public function logout(User $user, bool $allDevices = false): array
     {
         if ($allDevices) {
             $user->tokens()->delete();
             $message = 'تم تسجيل الخروج من جميع الأجهزة';
         } else {
-            $currentTokenId = request()->user()->currentAccessToken()->id;
-            $user->revokeToken($currentTokenId);
+            $currentTokenId = request()->user()->currentAccessToken()->delete();
             $message = 'تم تسجيل الخروج بنجاح';
         }
 
@@ -156,7 +162,7 @@ class AuthService
         ];
     }
 
-    
+
     // تغيير كلمة المرور (مع فحص القوة + تنبيه أمان)
     public function changePassword(User $user, string $currentPassword, string $newPassword): array
     {
@@ -213,7 +219,7 @@ class AuthService
         ];
     }
 
-    
+
     // طلب إعادة تعيين كلمة المرور
     public function requestPasswordReset(string $email): array
     {
@@ -248,9 +254,9 @@ class AuthService
         ];
     }
 
-    
+
     //  تأكيد إعادة تعيين كلمة المرور
-    
+
     public function confirmPasswordReset(string $token, string $code, string $newPassword): array
     {
         $reset = PasswordReset::where('token', $token)
@@ -295,9 +301,9 @@ class AuthService
         ];
     }
 
-    
+
     // الحصول على الأجهزة النشطة
-    
+
     public function getActiveDevices(User $user): array
     {
         $devices = [];
@@ -311,6 +317,8 @@ class AuthService
                 'last_used' => $token->last_used_at?->diffForHumans(),
                 'created' => $token->created_at->diffForHumans()
             ];
+
+
         }
 
         return [
@@ -322,7 +330,7 @@ class AuthService
         ];
     }
 
-    
+
     // إلغاء جهاز محدد
     public function revokeDevice(User $user, string $tokenId): array
     {
@@ -342,7 +350,7 @@ class AuthService
     }
 
 
-    
+
     // تنسيق بيانات المستخدم (مع دعم المدير)
     private function formatUser(User $user): array
     {
@@ -374,7 +382,7 @@ class AuthService
                 $data['profile'] = [
                     'teacher_id' => $profile->teacher_id,
                     'specialization' => $profile->specialization,
-                    'employment_status' => $profile->employment_status
+                    'status' => $profile->status
                 ];
             }
             if ($user->isStudent()) {
@@ -382,7 +390,7 @@ class AuthService
                     'student_id' => $profile->student_id,
                     'grade' => $profile->grade,
                     'section' => $profile->section,
-                    'enrollment_status' => $profile->enrollment_status,
+                    'status' => $profile->status,
                     'wallet_balance' => $profile->wallet_balance
                 ];
             }
@@ -391,9 +399,9 @@ class AuthService
         return $data;
     }
 
-    
+
     // إرسال تنبيه أمني عند تغيير كلمة المرور
-     
+
     private function sendSecurityAlert(User $user): void
     {
         $message = "مرحباً {$user->full_name}!\n\n";

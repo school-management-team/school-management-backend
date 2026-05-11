@@ -10,14 +10,14 @@ return new class extends Migration
     {
         Schema::create('login_history', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('user_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('user_id')->nullable()->constrained()->cascadeOnDelete();
             $table->string('ip_address', 45)->nullable();
             $table->text('user_agent')->nullable();
             $table->string('device_type')->nullable();
             $table->string('status'); // success, failed, locked
             $table->string('location')->nullable();
             $table->timestamps();
-            
+
             $table->index('user_id');
             $table->index('status');
             $table->index('created_at');

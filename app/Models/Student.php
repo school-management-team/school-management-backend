@@ -1,5 +1,4 @@
 <?php
-// app/Models/Student.php
 
 namespace App\Models;
 
@@ -16,7 +15,7 @@ class Student extends Model
         'birth_date', 'gender', 'education_level', 'grade', 'section',
         'address', 'guardian_phone', 'guardian_email', 'guardian_relation',
         'health_status', 'legal_document_path', 'bus_id',
-        'enrollment_status', 'enrollment_date', 'wallet_balance'
+        'status', 'enrollment_date', 'wallet_balance'
     ];
 
     protected $casts = [

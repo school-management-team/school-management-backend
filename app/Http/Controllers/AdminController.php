@@ -1,5 +1,5 @@
 <?php
-// app/Http/Controllers/AdminController.php
+
 
 namespace App\Http\Controllers;
 
@@ -13,12 +13,13 @@ use Illuminate\Support\Facades\Mail;
 
 class AdminController extends Controller
 {
-   
+
     // عرض طلبات التسجيل المعلقة
     public function pendingRegistrations()
     {
         $pendingStudents = User::where('role', 'student')
             ->where('is_active', false)
+            ->whereNotNull('email_verified_at')
             ->with('student')
             ->latest()
             ->get()
@@ -45,6 +46,7 @@ class AdminController extends Controller
 
         $pendingTeachers = User::where('role', 'teacher')
             ->where('is_active', false)
+            ->whereNotNull('email_verified_at')
             ->with('teacher')
             ->latest()
             ->get()
@@ -80,50 +82,63 @@ class AdminController extends Controller
     // الموافقة على مستخدم
     public function approveUser($userId)
     {
-        $user = User::find($userId);
+    $user = User::find($userId);
 
-            return response()->json([
-                'success' => true,
-                'message' => 'لم يتم العثور على المستخدم'
-            ]); 
-
-            if ($user->is_active) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'المستخدم مفعل مسبقاً'
-                ], 400);
-            }
-
-        // تفعيل المستخدم
-        $user->update(['is_active' => true]);
-
-        // تحديث حالة الملف الشخصي
-        if ($user->isTeacher() && $user->teacher) {
-            $user->teacher->update(['employment_status' => 'active']);
-        } elseif ($user->isStudent() && $user->student) {
-            $user->student->update(['enrollment_status' => 'active']);
-        }
-
-        // إرسال إيميل تفعيل
-        $this->sendApprovalEmail($user);
-
+    if(!$user) {
         return response()->json([
-            'success' => true,
-            'message' => 'تمت الموافقة على المستخدم بنجاح'
-        ]);
+            'success' => false,
+            'message' => 'لم يتم العثور على بيانات المستخدم'
+        ], 404);
     }
 
-    
+    //  هل قام المستخدم بتفعيل بريده الإلكتروني
+    elseif (!$user->isVerified()) {
+        return response()->json([
+            'success' => false,
+            'message' => 'لا يمكن الموافقة على المستخدم قبل تفعيل بريده الإلكتروني'
+        ], 400);
+    }
+
+    // هل المستخدم مفعل مسبقاً؟
+    elseif ($user->is_active) {
+        return response()->json([
+            'success' => false,
+            'message' => 'المستخدم مفعل مسبقاً'
+        ], 400);
+    }
+
+    // تفعيل المستخدم
+    $user->update(['is_active' => true]);
+
+    // تحديث حالة الملف الشخصي
+    if ($user->isTeacher() && $user->teacher) {
+        $user->teacher->update(['status' => 'active']);
+    } elseif ($user->isStudent() && $user->student) {
+        $user->student->update(['status' => 'active']);
+    }
+
+    // إرسال إيميل تفعيل
+    $this->sendApprovalEmail($user);
+
+    return response()->json([
+        'success' => true,
+        'message' => 'تمت الموافقة على المستخدم بنجاح'
+    ]);
+    }
+
+
+
     // رفض مستخدم
     public function rejectUser(Request $request, $userId)
     {
         $user = User::find($userId);
-
-        return response()->json([
-            'success' => true,
+        if(!$user)
+        {
+            return response()->json([
+            'success' => false,
             'message' => 'لم يتم العثور على المستخدم'
-        ]); 
-
+            ]);
+        }
         if ($user->is_active) {
             return response()->json([
                 'success' => false,
@@ -131,7 +146,11 @@ class AdminController extends Controller
             ], 400);
         }
 
-        $reason = $request->input('reason', 'لم يتم تحديد سبب');
+        if($request->reason){
+            $reason = $request->reason;
+        }else{
+            $reason='لا يوجد سبب';
+        }
 
         // حفظ البريد والاسم قبل الحذف
         $email = $user->email;
@@ -156,7 +175,7 @@ class AdminController extends Controller
         ]);
     }
 
-    
+
     // عرض تفاصيل مستخدم
     public function userDetails($userId)
     {
@@ -166,10 +185,10 @@ class AdminController extends Controller
             if(!$user)
             {
                 return response()->json([
-                'success' => true,
+                'success' => false,
                 'message' => 'لم يتم العثور على المستخدم'
-                ]); 
-            }    
+                ]);
+            }
 
             $details = [
             'user_id' => $user->id,
@@ -200,7 +219,7 @@ class AdminController extends Controller
                 'specialization' => $user->teacher->specialization,
                 'education_level' => $user->teacher->education_level,
                 'years_of_experience' => $user->teacher->years_of_experience,
-                'employment_status' => $user->teacher->employment_status,
+                'status' => $user->teacher->status,
                 'national_id' => $user->teacher->national_id,
                 'address' => $user->teacher->address,
                 'health_status' => $user->teacher->health_status,
@@ -211,7 +230,7 @@ class AdminController extends Controller
                 'grade' => $user->student->grade,
                 'section' => $user->student->section,
                 'education_level' => $user->student->education_level,
-                'enrollment_status' => $user->student->enrollment_status,
+                'status' => $user->student->status,
                 'father_name' => $user->student->father_name,
                 'mother_name' => $user->student->mother_name,
                 'guardian_phone' => $user->student->guardian_phone,
@@ -228,7 +247,7 @@ class AdminController extends Controller
         ]);
     }
 
-    
+
     // إحصائيات سريعة للمدير
     public function dashboardStats()
     {
@@ -236,9 +255,9 @@ class AdminController extends Controller
             'success' => true,
             'data' => [
                 'total_students' => Student::count(),
-                'active_students' => Student::where('enrollment_status', 'active')->count(),
+                'active_students' => Student::where('status', 'active')->count(),
                 'total_teachers' => Teacher::count(),
-                'active_teachers' => Teacher::where('employment_status', 'active')->count(),
+                'active_teachers' => Teacher::where('status', 'active')->count(),
                 'pending_registrations' => User::where('is_active', false)
                     ->whereIn('role', ['student', 'teacher'])
                     ->count(),
@@ -248,8 +267,8 @@ class AdminController extends Controller
         ]);
     }
 
-   
-    
+
+
     private function sendApprovalEmail(User $user): void
     {
         $roleArabic = match($user->role) {
@@ -292,7 +311,7 @@ class AdminController extends Controller
         ->where('is_active', true)
         ->with('teacher')
         ->get();
-    
+
     return response()->json(['success' => true, 'data' => $teachers]);
     }
 
@@ -302,7 +321,7 @@ class AdminController extends Controller
         ->where('is_active', true)
         ->with('student')
         ->get();
-    
+
         return response()->json(['success' => true, 'data' => $students]);
-    } 
+    }
 }

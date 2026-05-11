@@ -5,17 +5,12 @@ use App\Http\Controllers\AdminController;
 use App\Http\Controllers\BiometricAuthController;
 use Illuminate\Support\Facades\Route;
 
-/*
-|--------------------------------------------------------------------------
-| API Routes - نظام إدارة المدرسة
-|--------------------------------------------------------------------------
-*/
+
+// API Routes - نظام إدارة المدرسة
 
 Route::prefix('v1')->group(function () {
     
-    // ==========================================
-    // 1. المسارات العامة (PUBLIC ROUTES)
-    // ==========================================
+
     
     // تسجيل الدخول
     Route::post('/login', [AuthController::class, 'login']);
@@ -30,7 +25,7 @@ Route::prefix('v1')->group(function () {
     Route::post('/verify-account', [AuthController::class, 'verifyAccount']);
     
     // إعادة إرسال كود التفعيل
-    Route::post('/resend-verification', [AuthController::class, 'resendVerificationCode']);
+    Route::post('/resend-verification', [AuthController::class, 'resendVerificationCode'])->middleware('throttle:3,10');
     
     // نسيت كلمة المرور
     Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
@@ -44,9 +39,7 @@ Route::prefix('v1')->group(function () {
     // فحص قوة كلمة المرور
     Route::post('/check-password-strength', [AuthController::class, 'checkPasswordStrength']);
     
-    // ==========================================
-    // 2. مسارات البصمة العامة (PUBLIC BIOMETRIC)
-    // ==========================================
+  
     Route::prefix('biometric')->group(function () {
         // طلب الدخول بالبصمة
         Route::post('/login-options', [BiometricAuthController::class, 'loginOptions']);
@@ -55,9 +48,7 @@ Route::prefix('v1')->group(function () {
         Route::post('/login-confirm', [BiometricAuthController::class, 'loginConfirm']);
     });
      
-    // ==========================================
-    // 3. المسارات المحمية (PROTECTED ROUTES)
-    // ==========================================
+
     Route::middleware(['auth:sanctum', 'force.logout'])->group(function () {
         
         // الملف الشخصي
@@ -78,9 +69,7 @@ Route::prefix('v1')->group(function () {
         // سجل محاولات الدخول
         Route::get('/login-history', [AuthController::class, 'loginHistory']);
         
-        // ==========================================
-        // 4. مسارات البصمة المحمية
-        // ==========================================
+       
         Route::prefix('biometric')->group(function () {
             // طلب تسجيل بصمة جديدة
             Route::post('/register-options', [BiometricAuthController::class, 'registerOptions']);
@@ -95,9 +84,9 @@ Route::prefix('v1')->group(function () {
             Route::delete('/credentials/{credentialId}', [BiometricAuthController::class, 'deleteCredential']);
         });
        
-        // ==========================================
-        // 5. مسارات المدير (ADMIN ROUTES)
-        // ==========================================
+     
+        // مسارات المدير 
+        
         Route::middleware(['verified', 'role:admin'])->prefix('admin')->group(function () {
             // عرض الطلبات المعلقة
             Route::get('/pending-registrations', [AdminController::class, 'pendingRegistrations']);
@@ -124,9 +113,7 @@ Route::prefix('v1')->group(function () {
 });
 
 /*
-|--------------------------------------------------------------------------
 | Routes Summary
-|--------------------------------------------------------------------------
 |
 | PUBLIC (بدون توثيق):
 |   POST   /api/v1/login
@@ -162,5 +149,4 @@ Route::prefix('v1')->group(function () {
 |   GET    /api/v1/admin/students
 |   GET    /api/v1/admin/dashboard-stats
 |
-|--------------------------------------------------------------------------
 */

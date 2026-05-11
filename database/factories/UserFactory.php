@@ -27,6 +27,9 @@ class UserFactory extends Factory
             'failed_attempts' => 0,
             'locked_until' => null,
             'remember_token' => Str::random(10),
+            'student_id' => null,
+            'teacher_id' => null,
+            'admin_id' => null,
         ];
     }
 
@@ -62,5 +65,5 @@ class UserFactory extends Factory
         ]);
     }
 
-  
+
 }

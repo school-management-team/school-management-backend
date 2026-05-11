@@ -1,5 +1,4 @@
 <?php
-// app/Http/Middleware/CheckActive.php
 
 namespace App\Http\Middleware;
 
@@ -19,7 +18,7 @@ class CheckActive
 
         if (!$request->user()->is_active) {
             $request->user()->currentAccessToken()->delete();
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'حسابك غير مفعل، يرجى التواصل مع الإدارة'

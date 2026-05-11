@@ -1,5 +1,5 @@
 <?php
-// database/migrations/0001_01_01_000002_create_students_table.php
+
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
@@ -28,14 +28,14 @@ return new class extends Migration
             $table->text('health_status')->nullable();
             $table->string('legal_document_path')->nullable();
             $table->unsignedBigInteger('bus_id')->nullable();
-            $table->enum('enrollment_status', ['pending', 'active', 'graduated', 'transferred'])->default('pending');
+            $table->enum('status', ['unverified','pending','cancelled', 'active', 'graduated', 'transferred'])->default('pending');
             $table->date('enrollment_date');
             $table->decimal('wallet_balance', 10, 2)->default(0.00);
             $table->timestamps();
             $table->softDeletes();
-            
+
             $table->index(['education_level', 'grade', 'section']);
-            $table->index('enrollment_status');
+            $table->index('status');
         });
     }
 

@@ -1,5 +1,4 @@
 <?php
-// app/Models/User.php
 
 namespace App\Models;
 
@@ -8,7 +7,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
-use Laragear\WebAuthn\Contracts\WebAuthnAuthenticatable; 
+use Laragear\WebAuthn\Contracts\WebAuthnAuthenticatable;
 use Laragear\WebAuthn\WebAuthnAuthentication;
 
 
@@ -62,6 +61,8 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
     public function teacher()
     {
         return $this->belongsTo(Teacher::class);
+
+
     }
 
     public function student()
@@ -97,16 +98,16 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
     public function profile()
     {
         if ($this->isAdmin()) {
-            return null;  
+            return null;
         }
         if ($this->isTeacher()) return $this->teacher;
         if ($this->isStudent()) return $this->student;
-    
+
         return null;
     }
 
 
-    //  إدارة التوكنات  
+    //  إدارة التوكنات
     public function logoutAllDevices(): void
     {
         $this->tokens()->delete();
@@ -125,17 +126,17 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
         }
     }
 
-    //  تسجيل الخروج الإجباري 
+    //  تسجيل الخروج الإجباري
     public function checkForceLogout():bool
     {
         if (!$this->force_logout) {
             return false;
         }
-        
+
         if ($this->password_changed_at && $this->force_logout_at) {
             return $this->force_logout_at->gt($this->password_changed_at);
         }
-        
+
         return true;
     }
 
@@ -151,35 +152,22 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
             'created_at' => now()->toDateTimeString(),
             'last_activity' => now()->toDateTimeString()
         ];
-        
+
         if (count($tokens) > 10) {
             $tokens = array_slice($tokens, -10, 10, true);
         }
-        
-        $this->update(['active_tokens' => $tokens]);
-    }
 
-    public function revokeToken(string $tokenId): bool
-    {
-        $deleted = $this->tokens()->where('id', $tokenId)->delete();
-        
-        if ($deleted) {
-            $tokens = $this->active_tokens ?? [];
-            unset($tokens[$tokenId]);
-            $this->update(['active_tokens' => $tokens]);
-        }
-        
-        return $deleted > 0;
+        $this->update(['active_tokens' => $tokens]);
     }
 
     public function getActiveDevices(): array
     {
         $devices = [];
         $currentTokenId = request()->user()?->currentAccessToken()?->id;
-        
+
         foreach ($this->tokens as $token) {
             $tokenInfo = $this->active_tokens[$token->id] ?? null;
-            
+
             $devices[] = [
                 'id' => $token->id,
                 'name' => $token->name,
@@ -193,19 +181,19 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
                 'created' => $token->created_at->diffForHumans()
             ];
         }
-        
+
         return $devices;
     }
 
 
 
-    //  الحماية من محاولات الدخول 
+    //  الحماية من محاولات الدخول
     public function recordFailedAttempt(): void
     {
         $this->increment('failed_attempts');
-        
+
         if ($this->failed_attempts >= 5) {
-            $this->update(['locked_until' => now()->addMinutes(30)]);
+            $this->update(['locked_until' => now()->addMinutes(5)]);
         }
     }
 
@@ -222,12 +210,12 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
         if (!$this->locked_until) {
             return false;
         }
-        
+
         if ($this->locked_until->isPast()) {
             $this->update(['locked_until' => null]);
             return false;
         }
-        
+
         return true;
     }
 
@@ -241,16 +229,16 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
         return max(0, 5 - $this->failed_attempts);
     }
 
-    //  تفعيل البريد الإلكتروني 
+    //  تفعيل البريد الإلكتروني
     public function generateVerificationCode(): string
     {
         $code = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
-        
+
         $this->update([
             'verification_code' => $code,
             'verification_expires_at' => now()->addMinutes(30)
         ]);
-        
+
         return $code;
     }
 
@@ -259,21 +247,29 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
         if (!$this->verification_code || !$this->verification_expires_at) {
             return false;
         }
-        
+
         if ($this->verification_expires_at->isPast()) {
             return false;
         }
-        
+
         if ($this->verification_code !== $code) {
             return false;
         }
-        
+        if($this->isStudent()){
+            $this->student()->update(['status'=>'pending']);
+        }
+
+        if($this->isTeacher()){
+            $this->teacher()->update(['status'=>'pending']);
+        }
+
+
         $this->update([
             'email_verified_at' => now(),
             'verification_code' => null,
             'verification_expires_at' => null
         ]);
-        
+
         return true;
     }
 
@@ -283,7 +279,7 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
     }
 
 
-    //  تسجيل الدخول 
+    //  تسجيل الدخول
     public function recordLogin(array $deviceInfo = []): void
     {
         $this->update([
@@ -293,7 +289,7 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
         ]);
     }
 
-    //  Scopes 
+    //  Scopes
     public function scopeActive($query)
     {
         return $query->where('is_active', true);

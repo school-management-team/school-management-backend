@@ -1,5 +1,4 @@
 <?php
-// database/migrations/0001_01_01_000000_create_users_table.php
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
@@ -20,14 +19,11 @@ return new class extends Migration
             $table->timestamp('email_verified_at')->nullable();
             $table->timestamp('last_login_at')->nullable();
             $table->string('last_login_ip')->nullable();
-            
-            // المفاتيح الأجنبية
+
             $table->unsignedBigInteger('admin_id')->nullable();
             $table->unsignedBigInteger('teacher_id')->nullable();
             $table->unsignedBigInteger('student_id')->nullable();
-           
-            
-         
+
             $table->string('verification_code', 6)->nullable();
             $table->timestamp('verification_expires_at')->nullable();
             $table->timestamp('password_changed_at')->nullable();
@@ -36,20 +32,20 @@ return new class extends Migration
             $table->json('active_tokens')->nullable();
             $table->boolean('force_logout')->default(false);
             $table->timestamp('force_logout_at')->nullable();
-        
-            
+
+
             $table->rememberToken();
             $table->timestamp('remember_expires_at')->nullable();
             $table->timestamps();
             $table->softDeletes();
-            
+
             // الفهارس
             $table->index('role');
             $table->index('is_active');
             $table->index('admin_id');
             $table->index('teacher_id');
             $table->index('student_id');
-         
+
         });
     }
 

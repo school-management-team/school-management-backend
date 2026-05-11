@@ -1,5 +1,5 @@
 <?php
-// app/Http/Middleware/CheckRole.php
+
 
 namespace App\Http\Middleware;
 

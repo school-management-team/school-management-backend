@@ -1,5 +1,4 @@
 <?php
-// database/migrations/0001_01_01_000001_create_teachers_table.php
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
@@ -29,13 +28,13 @@ return new class extends Migration
             $table->date('hire_date');
             $table->string('cv_path')->nullable();
             $table->string('legal_document_path')->nullable();
-            $table->enum('employment_status', ['pending', 'active', 'on_leave', 'terminated'])->default('pending');
+            $table->enum('status', ['unverified','pending', 'active', 'on_leave', 'terminated'])->default('pending');
             $table->decimal('rating', 3, 2)->default(0.00);
             $table->timestamps();
             $table->softDeletes();
-            
+
             $table->index(['education_level', 'specialization']);
-            $table->index('employment_status');
+            $table->index('status');
         });
     }
 

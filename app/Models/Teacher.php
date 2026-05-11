@@ -1,6 +1,4 @@
 <?php
-// app/Models/Teacher.php
-
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -16,7 +14,7 @@ class Teacher extends Model
         'birth_date', 'gender', 'address', 'health_status', 'specialization',
         'education_level', 'high_school_branch', 'is_class_teacher',
         'years_of_experience', 'weekly_hours', 'hire_date',
-        'cv_path', 'legal_document_path', 'employment_status', 'rating'
+        'cv_path', 'legal_document_path', 'status', 'rating'
     ];
 
     protected $casts = [

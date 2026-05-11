@@ -1,5 +1,4 @@
 <?php
-// app/Http/Controllers/AuthController.php
 
 namespace App\Http\Controllers;
 
@@ -55,7 +54,7 @@ class AuthController extends Controller
         return response()->json($result, $statusCode);
     }
 
-    
+
     // تسجيل طالب جديد
 
 
@@ -96,10 +95,14 @@ class AuthController extends Controller
                 'grade' => $request->grade,
                 'address' => $request->address,
                 'guardian_phone' => $request->guardian_phone,
-                'enrollment_status' => 'pending',
+                'status' => 'unverified',
                 'enrollment_date' => now(),
                 'wallet_balance' => 0
             ]);
+
+            if (!$student || !$student->id) {
+                throw new \Exception('فشل في إنشاء سجل الطالب');
+            }
 
             $user = User::create([
                 'email' => $request->email,
@@ -107,11 +110,15 @@ class AuthController extends Controller
                 'role' => 'student',
                 'phone' => $request->guardian_phone,
                 'student_id' => $student->id,
-                'is_active' => false, 
+                'is_active' => false,
                 'password_changed_at' => now()
             ]);
 
-            //  إرسال كود تفعيل البريد 
+            if (!$user || !$user->id) {
+                throw new \Exception('فشل في إنشاء سجل المستخدم');
+            }
+
+            //  إرسال كود تفعيل البريد
             $code = $user->generateVerificationCode();
             $this->sendVerificationEmail($user, $code);
 
@@ -136,9 +143,9 @@ class AuthController extends Controller
             ], 500);
         }
     }
-    
+
     // تسجيل معلم جديد
-     
+
     public function registerTeacher(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -180,7 +187,7 @@ class AuthController extends Controller
                 'years_of_experience' => $request->years_of_experience,
                 'weekly_hours' => $request->weekly_hours,
                 'hire_date' => now(),
-                'employment_status' => 'pending'
+                'status' => 'unverified'
             ]);
 
             $user = User::create([
@@ -189,9 +196,13 @@ class AuthController extends Controller
                 'role' => 'teacher',
                 'phone' => $request->phone,
                 'teacher_id' => $teacher->id,
-                'is_active' => false,   
+                'is_active' => false,
                 'password_changed_at' => now()
             ]);
+
+            if (!$user || !$user->id) {
+                throw new \Exception('فشل في إنشاء سجل المستخدم');
+            }
 
             //  إرسال كود تفعيل البريد
             $code = $user->generateVerificationCode();
@@ -220,11 +231,12 @@ class AuthController extends Controller
     }
 
 
-    
+
     // تفعيل البريد الإلكتروني
-     
+
     public function verifyAccount(Request $request)
     {
+
         $validator = Validator::make($request->all(), [
             'email' => 'required|email',
             'code' => 'required|string|size:6'
@@ -247,6 +259,7 @@ class AuthController extends Controller
         }
 
         if ($user->verifyCode($request->code)) {
+
             return response()->json([
                 'success' => true,
                 'message' => 'تم تفعيل البريد الإلكتروني بنجاح'
@@ -259,9 +272,9 @@ class AuthController extends Controller
         ], 400);
     }
 
-    
+
     // إعادة إرسال كود التفعيل
-     
+
     public function resendVerificationCode(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -299,11 +312,11 @@ class AuthController extends Controller
             'message' => 'تم إرسال كود تفعيل جديد'
         ]);
     }
-    
 
-    
+
+
     // تسجيل الخروج
-     
+
     public function logout(Request $request)
     {
         $allDevices = $request->input('all_devices', false);
@@ -311,12 +324,12 @@ class AuthController extends Controller
         return response()->json($result);
     }
 
-    
+
     // الملف الشخصي
     public function profile(Request $request)
     {
         $user = $request->user();
-        
+
         if ($user->isTeacher()) {
             $user->load('teacher');
         }
@@ -330,9 +343,9 @@ class AuthController extends Controller
         ]);
     }
 
-    
+
     // تغيير كلمة المرور
-    
+
     public function changePassword(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -356,9 +369,9 @@ class AuthController extends Controller
         return response()->json($result, $result['success'] ? 200 : 400);
     }
 
-    
+
     // نسيت كلمة المرور
-    
+
     public function forgotPassword(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -384,9 +397,9 @@ class AuthController extends Controller
         return response()->json($result);
     }
 
-    
+
     // إعادة تعيين كلمة المرور
-    
+
     public function resetPassword(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -411,9 +424,9 @@ class AuthController extends Controller
         return response()->json($result, $result['success'] ? 200 : 400);
     }
 
-    
+
     // فحص قوة كلمة المرور
-   
+
     public function checkPasswordStrength(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -425,7 +438,7 @@ class AuthController extends Controller
                 'success' => false,
                 'errors' => $validator->errors()
             ], 422);
-        }   
+        }
 
         $passwordService = new PasswordStrengthService();
         $result = $passwordService->validate($request->password);
@@ -436,16 +449,16 @@ class AuthController extends Controller
         ]);
     }
 
-    
+
     // الأجهزة النشطة
-     
+
     public function activeDevices(Request $request)
     {
         $result = $this->authService->getActiveDevices($request->user());
         return response()->json($result);
     }
 
-    
+
     // إلغاء جهاز
     public function revokeDevice(Request $request, string $tokenId)
     {
@@ -453,7 +466,7 @@ class AuthController extends Controller
         return response()->json($result, $result['success'] ? 200 : 400);
     }
 
-    
+
     private function generateStudentId(): string
     {
         $year = date('Y');
@@ -483,7 +496,7 @@ class AuthController extends Controller
     private function sendRegistrationReceivedEmail(User $user): void
     {
        $role = $user->isTeacher() ? 'معلم' : 'طالب';
-    
+
         $message = "مرحباً {$user->full_name}!\n\n";
         $message .= "تم استلام طلب تسجيلك {$role} في نظام إدارة المدرسة بنجاح.\n\n";
         $message .= "✅ الخطوة 1: يرجى تفعيل بريدك الإلكتروني أولاً باستخدام الكود المرسل إليك.\n";
@@ -533,24 +546,24 @@ class AuthController extends Controller
                 'teacher_id' => $user->teacher->teacher_id,
                 'specialization' => $user->teacher->specialization,
                 'education_level' => $user->teacher->education_level,
-                'employment_status' => $user->teacher->employment_status
+                'status' => $user->teacher->status
             ];
-        } 
+        }
         if ($user->isStudent() && $user->student) {
             $response['profile'] = [
                 'student_id' => $user->student->student_id,
                 'education_level' => $user->student->education_level,
                 'grade' => $user->student->grade,
                 'section' => $user->student->section,
-                'enrollment_status' => $user->student->enrollment_status,
+                'status' => $user->student->status,
                 'wallet_balance' => $user->student->wallet_balance
             ];
-        } 
+        }
 
         return $response;
     }
 
-    
+
     // سجل محاولات الدخول (جديد)
 
     public function loginHistory(Request $request)

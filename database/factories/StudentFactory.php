@@ -13,13 +13,13 @@ class StudentFactory extends Factory
     public function definition(): array
     {
         $educationLevel = fake()->randomElement(['primary', 'middle', 'high']);
-        
+
         $grade = match($educationLevel) {
             'primary' => fake()->numberBetween(1, 6),
             'middle' => fake()->numberBetween(7, 9),
             'high' => fake()->numberBetween(10, 12),
         };
-        
+
         return [
             'first_name' => fake()->firstName(),
             'father_name' => fake()->firstNameMale(),
@@ -38,7 +38,7 @@ class StudentFactory extends Factory
             'health_status' => fake()->optional()->sentence(),
             'legal_document_path' => null,
             'bus_id' => null,
-            'enrollment_status' => fake()->randomElement(['pending', 'active', 'active', 'active']),
+            'status' => fake()->randomElement(['unverified','pending', 'active', 'active', 'active']),
             'enrollment_date' => fake()->dateTimeBetween('-3 years', 'now'),
             'wallet_balance' => fake()->randomFloat(2, 0, 500),
         ];
@@ -47,14 +47,14 @@ class StudentFactory extends Factory
     public function active(): static
     {
         return $this->state(fn (array $attributes) => [
-            'enrollment_status' => 'active',
+            'status' => 'active',
         ]);
     }
 
     public function pending(): static
     {
         return $this->state(fn (array $attributes) => [
-            'enrollment_status' => 'pending',
+            'status' => 'pending',
         ]);
     }
 

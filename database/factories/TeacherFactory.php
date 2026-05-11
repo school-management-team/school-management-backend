@@ -13,7 +13,7 @@ class TeacherFactory extends Factory
     public function definition(): array
     {
         $educationLevel = fake()->randomElement(['primary', 'middle', 'high']);
-        
+
         return [
             'first_name' => fake()->firstName(),
             'middle_name' => fake()->optional()->firstName(),
@@ -30,8 +30,8 @@ class TeacherFactory extends Factory
                 'تربية إسلامية', 'تربية فنية', 'تربية رياضية', 'معلوماتية'
             ]),
             'education_level' => $educationLevel,
-            'high_school_branch' => $educationLevel === 'high' 
-                ? fake()->randomElement(['scientific', 'literary']) 
+            'high_school_branch' => $educationLevel === 'high'
+                ? fake()->randomElement(['scientific', 'literary'])
                 : null,
             'is_class_teacher' => fake()->boolean(20),
             'years_of_experience' => fake()->numberBetween(0, 35),
@@ -39,7 +39,7 @@ class TeacherFactory extends Factory
             'hire_date' => fake()->dateTimeBetween('-10 years', 'now'),
             'cv_path' => null,
             'legal_document_path' => null,
-            'employment_status' => fake()->randomElement(['pending', 'active', 'active', 'active']), // 75% active
+            'status' => fake()->randomElement(['unverified','pending', 'active', 'active', 'active']), // 75% active
             'rating' => fake()->randomFloat(2, 2, 5),
         ];
     }
@@ -47,14 +47,14 @@ class TeacherFactory extends Factory
     public function active(): static
     {
         return $this->state(fn (array $attributes) => [
-            'employment_status' => 'active',
+            'status' => 'active',
         ]);
     }
 
     public function pending(): static
     {
         return $this->state(fn (array $attributes) => [
-            'employment_status' => 'pending',
+            'status' => 'pending',
         ]);
     }
 }

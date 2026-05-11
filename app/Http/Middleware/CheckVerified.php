@@ -1,5 +1,4 @@
 <?php
-// app/Http/Middleware/CheckVerified.php
 
 namespace App\Http\Middleware;
 
