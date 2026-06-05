@@ -11,26 +11,27 @@ class Student extends Model
     use HasFactory, SoftDeletes;
 
     protected $fillable = [
-        'first_name', 'father_name', 'mother_name', 'last_name', 'student_id',
-        'birth_date', 'gender', 'education_level', 'grade', 'section',
-        'address', 'guardian_phone', 'guardian_email', 'guardian_relation',
-        'health_status', 'legal_document_path', 'bus_id',
-        'status', 'enrollment_date', 'wallet_balance'
+        'student_name', 'father_name', 'mother_name',
+        'birth_date', 'gender', 'education_level', 'grade',
+        'status', 'enrollment_date'
     ];
 
     protected $casts = [
         'birth_date' => 'date',
         'enrollment_date' => 'date',
-        'wallet_balance' => 'decimal:2',
+
     ];
 
     public function user()
     {
         return $this->hasOne(User::class, 'student_id');
     }
-
-    public function getFullNameAttribute(): string
+    public function guardians()
     {
-        return $this->first_name . ' ' . $this->father_name . ' ' . $this->last_name;
+        return $this->belongsToMany(Guardian::class, 'guardian_student')
+        ->withPivot('relationship', 'is_primary')
+        ->withTimestamps();
     }
+
+
 }

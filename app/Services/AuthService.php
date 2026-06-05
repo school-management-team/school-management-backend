@@ -3,7 +3,8 @@
 namespace App\Services;
 
 use App\Models\User;
-use App\Models\LoginHistory;
+use App\Models\Student;
+use App\Models\Guardian;
 use App\Models\PasswordReset;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
@@ -13,37 +14,23 @@ use Illuminate\Support\Str;
 class AuthService
 {
     // تسجيل الدخول
-    public function login(string $email, string $password, array $deviceInfo = []): array
+    public function login(string $login, string $password, bool $remember = false): array
     {
-        $user = User::where('email', $email)->first();
+        // تحديد إذا كان بريد أو رقم هاتف
+        $user = filter_var($login, FILTER_VALIDATE_EMAIL)
+            ? User::where('email', $login)->first()
+            : User::where('phone', $login)->first();
 
         if (!$user) {
-            //  تسجيل محاولة فاشلة (مستخدم غير موجود)
-            LoginHistory::create([
-                'user_id' => null,
-                'ip_address' => request()->ip(),
-                'user_agent' => request()->userAgent(),
-                'device_type' => $deviceInfo['device_type'] ?? 'unknown',
-                'status' => 'failed',
-            ]);
-
             return [
                 'success' => false,
-                'message' => 'البريد الإلكتروني أو كلمة المرور غير صحيحة'
+                'message' => 'البريد الإلكتروني أو رقم الهاتف او كلمة المرور غير صحيحة'
             ];
         }
 
 
         // التحقق من قفل الحساب
         if ($user->isLocked()) {
-            //  تسجيل محاولة مقفولة
-            LoginHistory::create([
-                'user_id' => $user->id,
-                'ip_address' => request()->ip(),
-                'user_agent' => request()->userAgent(),
-                'device_type' => $deviceInfo['device_type'] ?? 'unknown',
-                'status' => 'locked',
-            ]);
 
             return [
                 'success' => false,
@@ -58,28 +45,15 @@ class AuthService
                 'message' => 'الحساب غير مقبول حتى الان. في انتظار موافقة الإدارة'
             ];
         }
-
         if(!$user->isVerified()){
             return [
                 'success' => false,
                 'message' => 'لم تقم بتفعيل حسابك بعد'
             ];
         }
-
-
         // التحقق من كلمة المرور
         if (!Hash::check($password, $user->password)) {
             $user->recordFailedAttempt();
-
-            //  تسجيل محاولة فاشلة
-            LoginHistory::create([
-                'user_id' => $user->id,
-                'ip_address' => request()->ip(),
-                'user_agent' => request()->userAgent(),
-                'device_type' => $deviceInfo['device_type'] ?? 'unknown',
-                'status' => 'failed',
-            ]);
-
             $remaining = $user->getRemainingAttempts();
 
             if ($user->isLocked()) {
@@ -94,42 +68,16 @@ class AuthService
                 'message' => 'كلمة المرور غير صحيحة. متبقي ' . $remaining . ' محاولات'
             ];
         }
-
         // إعادة تعيين المحاولات الفاشلة
         $user->resetFailedAttempts();
-
-        //  REMEMBER ME + تحديد مدة التوكن
-        $remember = $deviceInfo['remember'] ?? false;
-        $expiration = $remember
-            ? now()->addDays(30)  // شهر كامل
-            : now()->addHours(2); // ساعتين فقط
+        // مدة التوكن حسب تذكرني
+        $expiration = $remember ? now()->addDays(30) : now()->addHours(2);
 
         // إنشاء توكن
         $token = $user->createToken('auth_token', ['*'], $expiration)->plainTextToken;
-        $tokenId = explode('|', $token)[0];
 
-        //  تخزين remember token إذا طلب ذلك
-        if ($remember) {
-            $user->update([
-                'remember_token' => Str::random(60),
-                'remember_expires_at' => now()->addDays(30),
-            ]);
-        }
-
-        // تسجيل الجهاز في القائمة النشطة
-        $user->addActiveToken($tokenId, $deviceInfo);
-
-        // تحديث معلومات الدخول
-        $user->recordLogin($deviceInfo);
-
-        //  تسجيل دخول ناجح في Login History
-        LoginHistory::create([
-            'user_id' => $user->id,
-            'ip_address' => request()->ip(),
-            'user_agent' => request()->userAgent(),
-            'device_type' => $deviceInfo['device_type'] ?? 'unknown',
-            'status' => 'success',
-        ]);
+        // تحديث آخر دخول
+        $user->update(['last_login_at' => now()]);
 
         return [
             'success' => true,
@@ -138,7 +86,7 @@ class AuthService
                 'user' => $this->formatUser($user),
                 'token' => $token,
                 'remember' => $remember,
-                'expires_in' => $remember ? '30 يوم' : 'ساعتين'
+                'expires_at' => $expiration->toDateTimeString()
             ]
         ];
     }
@@ -146,19 +94,12 @@ class AuthService
 
     //  تسجيل الخروج
 
-    public function logout(User $user, bool $allDevices = false): array
+    public function logout(User $user): array
     {
-        if ($allDevices) {
-            $user->tokens()->delete();
-            $message = 'تم تسجيل الخروج من جميع الأجهزة';
-        } else {
-            $currentTokenId = request()->user()->currentAccessToken()->delete();
-            $message = 'تم تسجيل الخروج بنجاح';
-        }
-
+        $user->currentAccessToken()->delete();
         return [
             'success' => true,
-            'message' => $message
+            'message' => 'تم تسجيل الخروج بنجاح'
         ];
     }
 
@@ -166,17 +107,6 @@ class AuthService
     // تغيير كلمة المرور (مع فحص القوة + تنبيه أمان)
     public function changePassword(User $user, string $currentPassword, string $newPassword): array
     {
-        //  فحص قوة كلمة المرور الجديدة
-        $passwordService = new PasswordStrengthService();
-        $strengthResult = $passwordService->validate($newPassword);
-
-        if (!$strengthResult['is_valid']) {
-            return [
-                'success' => false,
-                'message' => 'كلمة المرور ليست قوية بما يكفي',
-                'errors' => $strengthResult['feedback']
-            ];
-        }
 
         //  فحص الحد الأدنى للطول
         if (strlen($newPassword) < 8) {
@@ -200,90 +130,34 @@ class AuthService
             'password_changed_at' => now()
         ]);
 
-        //  حذف جميع الجلسات الأخرى (يبقى الجهاز الحالي فقط)
-        $user->tokens()->where('id', '!=', request()->user()->currentAccessToken()->id)->delete();
-
-        //  إرسال تنبيه أمني بالإيميل
-        try {
-            $this->sendSecurityAlert($user);
-        } catch (\Exception $e) {
-            \Log::error('فشل إرسال تنبيه الأمان: ' . $e->getMessage());
-        }
-
         return [
             'success' => true,
-            'message' => 'تم تغيير كلمة المرور بنجاح. تم إرسال تنبيه أمني إلى بريدك.',
-            'data' => [
-                'password_strength' => $strengthResult
-            ]
+            'message' => 'تم تغيير كلمة المرور بنجاح.',
+
         ];
     }
-
-
-    // طلب إعادة تعيين كلمة المرور
-    public function requestPasswordReset(string $email): array
-    {
-        $user = User::where('email', $email)->first();
-
-        if (!$user) {
-            return [
-                'success' => true,
-                'message' => 'إذا كان البريد مسجلاً، سيصلك رابط إعادة التعيين'
-            ];
-        }
-
-        PasswordReset::where('email', $email)->delete();
-
-        $token = Str::random(64);
-        $code = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
-
-        PasswordReset::create([
-            'email' => $email,
-            'token' => $token,
-            'code' => $code,
-            'expires_at' => now()->addHours(2)
-        ]);
-
-        return [
-            'success' => true,
-            'message' => 'تم إرسال رابط إعادة التعيين إلى بريدك الإلكتروني',
-            'data' => [
-                'token' => $token,
-                'code' => $code
-            ]
-        ];
-    }
-
 
     //  تأكيد إعادة تعيين كلمة المرور
 
-    public function confirmPasswordReset(string $token, string $code, string $newPassword): array
+    public function confirmPasswordReset(string $login, string $code, string $newPassword): array
     {
-        $reset = PasswordReset::where('token', $token)
-            ->where('code', $code)
-            ->where('used', false)
-            ->first();
-
-        if (!$reset) {
-            return [
-                'success' => false,
-                'message' => 'رمز التحقق غير صحيح'
-            ];
-        }
-
-        if ($reset->expires_at->isPast()) {
-            return [
-                'success' => false,
-                'message' => 'انتهت صلاحية الرابط'
-            ];
-        }
-
-        $user = User::where('email', $reset->email)->first();
+        //  البحث بالبريد أو الرقم
+        $user = filter_var($login, FILTER_VALIDATE_EMAIL)
+            ? User::where('email', $login)->first()
+            : User::where('phone', $login)->first();
 
         if (!$user) {
             return [
+            'success' => false,
+            'message' => 'المستخدم غير موجود'
+            ];
+        }
+
+
+        if (!$user->verifyCode($code)) {
+            return [
                 'success' => false,
-                'message' => 'المستخدم غير موجود'
+                'message' => 'الرمز غير صحيح أو منتهي الصلاحية'
             ];
         }
 
@@ -293,7 +167,6 @@ class AuthService
         ]);
 
         $user->tokens()->delete();
-        $reset->markAsUsed();
 
         return [
             'success' => true,
@@ -302,57 +175,9 @@ class AuthService
     }
 
 
-    // الحصول على الأجهزة النشطة
-
-    public function getActiveDevices(User $user): array
-    {
-        $devices = [];
-        $currentTokenId = request()->user()->currentAccessToken()->id;
-
-        foreach ($user->tokens as $token) {
-            $devices[] = [
-                'id' => $token->id,
-                'name' => $token->name,
-                'is_current' => $token->id === $currentTokenId,
-                'last_used' => $token->last_used_at?->diffForHumans(),
-                'created' => $token->created_at->diffForHumans()
-            ];
-
-
-        }
-
-        return [
-            'success' => true,
-            'data' => [
-                'devices' => $devices,
-                'total' => count($devices)
-            ]
-        ];
-    }
-
-
-    // إلغاء جهاز محدد
-    public function revokeDevice(User $user, string $tokenId): array
-    {
-        if ($tokenId === request()->user()->currentAccessToken()->id) {
-            return [
-                'success' => false,
-                'message' => 'لا يمكن إلغاء الجهاز الحالي'
-            ];
-        }
-
-        $user->tokens()->where('id', $tokenId)->delete();
-
-        return [
-            'success' => true,
-            'message' => 'تم إلغاء الجهاز بنجاح'
-        ];
-    }
-
-
 
     // تنسيق بيانات المستخدم (مع دعم المدير)
-    private function formatUser(User $user): array
+     function formatUser(User $user): array
     {
         $data = [
             'id' => $user->id,
@@ -360,7 +185,6 @@ class AuthService
             'role' => $user->role,
             'phone' => $user->phone,
             'is_active' => $user->is_active,
-            'full_name' => $user->full_name,
             'email_verified' => $user->isVerified()
         ];
 
@@ -380,45 +204,99 @@ class AuthService
         if ($profile) {
             if ($user->isTeacher()) {
                 $data['profile'] = [
-                    'teacher_id' => $profile->teacher_id,
+                    'teacher_id' => $profile->id,
+                    'teacher_name' => $profile->teacher_name,
+                    'grade' =>$profile->grade,
                     'specialization' => $profile->specialization,
                     'status' => $profile->status
                 ];
             }
             if ($user->isStudent()) {
                 $data['profile'] = [
-                    'student_id' => $profile->student_id,
+                    'student_id' => $profile->id,
+                    'student_name' => $profile->student_name,
                     'grade' => $profile->grade,
-                    'section' => $profile->section,
-                    'status' => $profile->status,
-                    'wallet_balance' => $profile->wallet_balance
+                    'education_level' => $profile->education_level,
+                    'status' => $profile->status
+
                 ];
             }
         }
 
+        if ($user->isGuardian() && $user->guardian) {
+            $data['profile'] = [
+            'guardian_name' => $user->guardian->guardian_name,
+            'relationship' => $user->guardian->relationship,
+            'children_count' => $user->guardian->number_of_children
+            ];
+        }
+
         return $data;
     }
-
-
-    // إرسال تنبيه أمني عند تغيير كلمة المرور
-
-    private function sendSecurityAlert(User $user): void
+    public function findStudentByNumber(string $studentNumber): ?Student
     {
-        $message = "مرحباً {$user->full_name}!\n\n";
-        $message .= "🔐 تنبيه أمني: تم تغيير كلمة المرور الخاصة بحسابك.\n\n";
-        $message .= "📅 التاريخ والوقت: " . now()->format('Y-m-d H:i:s') . "\n";
-        $message .= "🌐 عنوان IP: " . request()->ip() . "\n";
-        $message .= "💻 المتصفح: " . request()->userAgent() . "\n\n";
-        $message .= "إذا لم تكن أنت من قام بهذا التغيير:\n";
-        $message .= "1. سجل الدخول فوراً وغير كلمة المرور\n";
-        $message .= "2. تواصل مع الدعم الفني فوراً\n";
-        $message .= "3. راجع نشاط حسابك\n\n";
-        $message .= "للتواصل مع الدعم: support@school.com\n\n";
-        $message .= "مع تحيات إدارة المدرسة";
+        return Student::where('student_number', $studentNumber)
+            ->where('status', 'active')
+            ->first();
+    }
 
-        Mail::raw($message, function ($mail) use ($user) {
-            $mail->to($user->email)
-                ->subject('🔐 تنبيه أمني: تم تغيير كلمة المرور');
-        });
+    /**
+     * التحقق من أن الطالب غير مرتبط بالفعل بهذا ولي الأمر
+     */
+    public function isStudentLinkedToGuardian(Student $student, Guardian $guardian): bool
+    {
+        return $guardian->students()
+            ->where('student_id', $student->id)
+            ->exists();
+    }
+
+    /**
+     * تحديث معلومات الطالب من ولي الأمر
+     */
+    public function updateStudentParentInfo(Student $student, Guardian $guardian, string $relationship): void
+    {
+        if ($relationship === 'father' && !$student->father_name) {
+            $student->update(['father_name' => $guardian->guardian_name]);
+        } elseif ($relationship === 'mother' && !$student->mother_name) {
+            $student->update(['mother_name' => $guardian->guardian_name]);
+        }
+    }
+
+    /**
+     * ربط الطالب بولي الأمر
+     */
+    public function linkStudentToGuardian(Student $student, Guardian $guardian, string $relationship, bool $isPrimary = false): array
+    {
+        // التحقق من عدم الربط مسبقاً
+        if ($this->isStudentLinkedToGuardian($student, $guardian)) {
+            return [
+                'success' => false,
+                'message' => 'هذا الطالب مرتبط بك بالفعل'
+            ];
+        }
+
+        // تحديث معلومات الطالب
+        $this->updateStudentParentInfo($student, $guardian, $relationship);
+
+        // تحديد إذا كان أول طالب (أساسي)
+        $isPrimary = $isPrimary || $guardian->students()->count() === 0;
+
+        // ربط الطالب بولي الأمر
+        $guardian->students()->attach($student->id, [
+            'relationship' => $relationship,
+            'is_primary' => $isPrimary
+        ]);
+
+        return [
+            'success' => true,
+            'message' => 'تم ربط الطالب بولي الأمر بنجاح',
+            'data' => [
+                'student_id' => $student->id,
+                'student_name' => $student->student_name,
+                'student_number' => $student->student_number,
+                'relationship' => $relationship,
+                'is_primary' => $isPrimary
+            ]
+        ];
     }
 }

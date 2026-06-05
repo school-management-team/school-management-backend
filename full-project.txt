@@ -1,0 +1,2909 @@
+<?php
+// app/Http/Controllers/AdminController.php
+
+namespace App\Http\Controllers;
+
+use App\Http\Controllers\Controller;
+use App\Models\User;
+use App\Models\Teacher;
+use App\Models\Student;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Mail;
+
+
+class AdminController extends Controller
+{
+    /**
+     * عرض طلبات التسجيل المعلقة
+     * GET /api/v1/admin/pending-registrations
+     */
+    public function pendingRegistrations()
+    {
+        $pendingStudents = User::where('role', 'student')
+            ->where('is_active', false)
+            ->with('student')
+            ->latest()
+            ->get()
+            ->map(function ($user) {
+                return [
+                    'user_id' => $user->id,
+                    'email' => $user->email,
+                    'full_name' => $user->full_name,
+                    'phone' => $user->phone,
+                    'registered_at' => $user->created_at->format('Y-m-d H:i'),
+                    'student_details' => [
+                        'student_id' => $user->student->student_id ?? null,
+                        'grade' => $user->student->grade ?? null,
+                        'education_level' => $user->student->education_level ?? null,
+                        'birth_date' => $user->student->birth_date?->format('Y-m-d'),
+                        'father_name' => $user->student->father_name ?? null,
+                        'mother_name' => $user->student->mother_name ?? null,
+                        'guardian_phone' => $user->student->guardian_phone ?? null,
+                        'address' => $user->student->address ?? null,
+                        'health_status' => $user->student->health_status ?? null,
+                    ]
+                ];
+            });
+
+        $pendingTeachers = User::where('role', 'teacher')
+            ->where('is_active', false)
+            ->with('teacher')
+            ->latest()
+            ->get()
+            ->map(function ($user) {
+                return [
+                    'user_id' => $user->id,
+                    'email' => $user->email,
+                    'full_name' => $user->full_name,
+                    'phone' => $user->phone,
+                    'registered_at' => $user->created_at->format('Y-m-d H:i'),
+                    'teacher_details' => [
+                        'teacher_id' => $user->teacher->teacher_id ?? null,
+                        'specialization' => $user->teacher->specialization ?? null,
+                        'education_level' => $user->teacher->education_level ?? null,
+                        'years_of_experience' => $user->teacher->years_of_experience ?? null,
+                        'national_id' => $user->teacher->national_id ?? null,
+                        'address' => $user->teacher->address ?? null,
+                        'health_status' => $user->teacher->health_status ?? null,
+                    ]
+                ];
+            });
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'students' => $pendingStudents,
+                'teachers' => $pendingTeachers,
+                'total_pending' => $pendingStudents->count() + $pendingTeachers->count()
+            ]
+        ]);
+    }
+
+    /**
+     * الموافقة على مستخدم
+     * POST /api/v1/admin/approve-user/{userId}
+     */
+    public function approveUser($userId)
+    {
+        $user = User::findOrFail($userId);
+
+        if ($user->is_active) {
+            return response()->json([
+                'success' => false,
+                'message' => 'المستخدم مفعل مسبقاً'
+            ], 400);
+        }
+
+        // تفعيل المستخدم
+        $user->update(['is_active' => true]);
+
+        // تحديث حالة الملف الشخصي
+        if ($user->isTeacher() && $user->teacher) {
+            $user->teacher->update(['employment_status' => 'active']);
+        } elseif ($user->isStudent() && $user->student) {
+            $user->student->update(['enrollment_status' => 'active']);
+        }
+
+        // إرسال إيميل تفعيل
+        $this->sendApprovalEmail($user);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'تمت الموافقة على المستخدم بنجاح'
+        ]);
+    }
+
+    /**
+     * رفض مستخدم
+     * DELETE /api/v1/admin/reject-user/{userId}
+     */
+    public function rejectUser(Request $request, $userId)
+    {
+        $user = User::findOrFail($userId);
+
+        if ($user->is_active) {
+            return response()->json([
+                'success' => false,
+                'message' => 'لا يمكن رفض مستخدم مفعل'
+            ], 400);
+        }
+
+        $reason = $request->input('reason', 'لم يتم تحديد سبب');
+
+        // حفظ البريد والاسم قبل الحذف
+        $email = $user->email;
+        $name = $user->full_name;
+
+        // حذف الملف الشخصي
+        if ($user->teacher) {
+            $user->teacher->delete();
+        } elseif ($user->student) {
+            $user->student->delete();
+        }
+
+        // حذف المستخدم
+        $user->delete();
+
+        // إرسال إيميل رفض
+        $this->sendRejectionEmail($email, $name, $reason);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'تم رفض المستخدم بنجاح'
+        ]);
+    }
+
+    /**
+     * عرض تفاصيل مستخدم
+     * GET /api/v1/admin/user/{userId}
+     */
+    public function userDetails($userId)
+    {
+        $user = User::with(['teacher', 'student'])
+            ->findOrFail($userId);
+
+        $details = [
+            'user_id' => $user->id,
+            'email' => $user->email,
+            'role' => $user->role,
+            'full_name' => $user->full_name,
+            'phone' => $user->phone,
+            'is_active' => $user->is_active,
+            'registered_at' => $user->created_at->format('Y-m-d H:i'),
+            'last_login_at' => $user->last_login_at?->format('Y-m-d H:i'),
+        ];
+
+        if ($user->isAdmin()) {
+            $details['admin_details'] = [
+                'type' => 'مدير النظام',
+                'access_level' => 'كامل',
+                'can_manage' => ['teachers', 'students', 'system']
+            ];
+            return response()->json([
+                'success' => true,
+                'data' => $details
+            ]);
+        }
+
+        if ($user->isTeacher() && $user->teacher) {
+            $details['teacher_details'] = [
+                'teacher_id' => $user->teacher->teacher_id,
+                'specialization' => $user->teacher->specialization,
+                'education_level' => $user->teacher->education_level,
+                'years_of_experience' => $user->teacher->years_of_experience,
+                'employment_status' => $user->teacher->employment_status,
+                'national_id' => $user->teacher->national_id,
+                'address' => $user->teacher->address,
+                'health_status' => $user->teacher->health_status,
+            ];
+        } elseif ($user->isStudent() && $user->student) {
+            $details['student_details'] = [
+                'student_id' => $user->student->student_id,
+                'grade' => $user->student->grade,
+                'section' => $user->student->section,
+                'education_level' => $user->student->education_level,
+                'enrollment_status' => $user->student->enrollment_status,
+                'father_name' => $user->student->father_name,
+                'mother_name' => $user->student->mother_name,
+                'guardian_phone' => $user->student->guardian_phone,
+                'guardian_email' => $user->student->guardian_email,
+                'address' => $user->student->address,
+                'health_status' => $user->student->health_status,
+                'wallet_balance' => $user->student->wallet_balance,
+            ];
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $details
+        ]);
+    }
+
+    /**
+     * إحصائيات سريعة للمدير
+     */
+    public function dashboardStats()
+    {
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'total_students' => Student::count(),
+                'active_students' => Student::where('enrollment_status', 'active')->count(),
+                'total_teachers' => Teacher::count(),
+                'active_teachers' => Teacher::where('employment_status', 'active')->count(),
+                'pending_registrations' => User::where('is_active', false)
+                    ->whereIn('role', ['student', 'teacher'])
+                    ->count(),
+                'pending_students' => User::where('role', 'student')->where('is_active', false)->count(),
+                'pending_teachers' => User::where('role', 'teacher')->where('is_active', false)->count(),
+            ]
+        ]);
+    }
+
+    // ========== دوال مساعدة ==========
+    
+private function sendApprovalEmail(User $user): void
+{
+    $roleArabic = match($user->role) {
+        'teacher' => 'معلم',
+        'student' => 'طالب',
+        default => 'مستخدم'
+    };
+
+    $message = "مرحباً {$user->full_name}!\n\n";
+    $message .= "🎉 تمت الموافقة على طلب تسجيلك {$roleArabic} في نظام إدارة المدرسة.\n\n";
+    $message .= "✅ بريدك الإلكتروني مفعل.\n";
+    $message .= "✅ تمت الموافقة على طلبك من قبل الإدارة.\n\n";
+    $message .= "يمكنك الآن تسجيل الدخول إلى حسابك والبدء في استخدام النظام.\n\n";
+    $message .= "نتمنى لك التوفيق!\n\n";
+    $message .= "--\nإدارة المدرسة";
+
+    Mail::raw($message, function ($mail) use ($user) {
+        $mail->to($user->email)
+             ->subject('🎉 تم تفعيل حسابك - نظام إدارة المدرسة');
+    });
+}
+
+    private function sendRejectionEmail(string $email, string $name, string $reason): void
+    {
+        $message = "مرحباً {$name}!\n\n";
+        $message .= "نأسف لإعلامك بأنه تم رفض طلب تسجيلك في نظام إدارة المدرسة.\n\n";
+        $message .= "سبب الرفض: {$reason}\n\n";
+        $message .= "يمكنك التواصل مع الإدارة لمزيد من المعلومات.\n\n";
+        $message .= "--\nإدارة المدرسة";
+
+        Mail::raw($message, function ($mail) use ($email) {
+            $mail->to($email)
+                 ->subject('بخصوص طلب التسجيل - نظام إدارة المدرسة');
+        });
+    }
+}
+<?php
+// app/Http/Controllers/API/AuthController.php
+
+namespace App\Http\Controllers;
+
+use App\Http\Controllers\Controller;
+use App\Models\User;
+use App\Models\Teacher;
+use App\Models\Student;
+use App\Models\LoginHistory;
+use App\Services\AuthService;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Validator;
+
+class AuthController extends Controller
+{
+    protected $authService;
+
+    public function __construct(AuthService $authService)
+    {
+        $this->authService = $authService;
+    }
+
+    /**
+     * تسجيل الدخول
+     */
+    public function login(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'email' => 'required|email',
+            'password' => 'required|string',
+            'device_name' => 'nullable|string',
+            'device_type' => 'nullable|string',
+            'device_token' => 'nullable|string'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        $deviceInfo = [
+            'device_name' => $request->device_name ?? $request->userAgent(),
+            'device_type' => $request->device_type ?? 'web',
+            'device_token' => $request->device_token
+        ];
+
+        $result = $this->authService->login($request->email, $request->password, $deviceInfo);
+
+        $statusCode = $result['success'] ? 200 : 401;
+        return response()->json($result, $statusCode);
+    }
+
+    /**
+     * تسجيل طالب جديد
+     */
+  // app/Http/Controllers/AuthController.php
+
+public function registerStudent(Request $request)
+{
+    $validator = Validator::make($request->all(), [
+        'email' => 'required|email|unique:users',
+        'password' => 'required|string|min:8|confirmed',
+        'first_name' => 'required|string|max:50',
+        'father_name' => 'required|string|max:50',
+        'mother_name' => 'required|string|max:50',
+        'last_name' => 'required|string|max:50',
+        'birth_date' => 'required|date|after_or_equal:2008-01-01|before_or_equal:2019-12-31',
+        'gender' => 'required|in:male,female',
+        'education_level' => 'required|in:primary,middle,high',
+        'grade' => 'required|integer|between:1,12',
+        'address' => 'required|string',
+        'guardian_phone' => 'required|string',
+    ]);
+
+    if ($validator->fails()) {
+        return response()->json([
+            'success' => false,
+            'errors' => $validator->errors()
+        ], 422);
+    }
+
+    try {
+        $student = Student::create([
+            'first_name' => $request->first_name,
+            'father_name' => $request->father_name,
+            'mother_name' => $request->mother_name,
+            'last_name' => $request->last_name,
+            'student_id' => $this->generateStudentId(),
+            'birth_date' => $request->birth_date,
+            'gender' => $request->gender,
+            'education_level' => $request->education_level,
+            'grade' => $request->grade,
+            'address' => $request->address,
+            'guardian_phone' => $request->guardian_phone,
+            'enrollment_status' => 'pending',
+            'enrollment_date' => now(),
+            'wallet_balance' => 0
+        ]);
+
+        $user = User::create([
+            'email' => $request->email,
+            'password' => Hash::make($request->password),
+            'role' => 'student',
+            'phone' => $request->guardian_phone,
+            'student_id' => $student->id,
+            'is_active' => false, 
+            'password_changed_at' => now()
+        ]);
+
+        //  1. إرسال كود تفعيل البريد أولاً
+        $code = $user->generateVerificationCode();
+        $this->sendVerificationEmail($user, $code);
+
+        //  2. إرسال إيميل استلام الطلب
+        $this->sendRegistrationReceivedEmail($user);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'تم التسجيل بنجاح. يرجى تفعيل بريدك الإلكتروني. بعد التفعيل، سيتم مراجعة طلبك من قبل الإدارة.',
+            'data' => [
+                'user_id' => $user->id,
+                'student_id' => $student->student_id,
+                'requires_verification' => true,
+                'status' => 'pending_verification'
+            ]
+        ], 201);
+
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'حدث خطأ أثناء التسجيل'
+        ], 500);
+    }
+}
+    /**
+     * تسجيل معلم جديد
+     */
+   public function registerTeacher(Request $request)
+{
+    $validator = Validator::make($request->all(), [
+        'email' => 'required|email|unique:users',
+        'password' => 'required|string|min:8|confirmed',
+        'first_name' => 'required|string|max:50',
+        'last_name' => 'required|string|max:50',
+        'phone' => 'required|string',
+        'national_id' => 'required|string|unique:teachers',
+        'birth_date' => 'required|date|before:-22 years',
+        'gender' => 'required|in:male,female',
+        'specialization' => 'required|string',
+        'education_level' => 'required|in:primary,middle,high',
+        'years_of_experience' => 'required|integer|min:0',
+        'weekly_hours' => 'required|integer|min:1|max:40',
+        'address' => 'required|string',
+    ]);
+
+    if ($validator->fails()) {
+        return response()->json([
+            'success' => false,
+            'errors' => $validator->errors()
+        ], 422);
+    }
+
+    try {
+        $teacher = Teacher::create([
+            'first_name' => $request->first_name,
+            'middle_name' => $request->middle_name,
+            'last_name' => $request->last_name,
+            'teacher_id' => $this->generateTeacherId(),
+            'national_id' => $request->national_id,
+            'birth_date' => $request->birth_date,
+            'gender' => $request->gender,
+            'address' => $request->address,
+            'health_status' => $request->health_status ?? null,
+            'specialization' => $request->specialization,
+            'education_level' => $request->education_level,
+            'years_of_experience' => $request->years_of_experience,
+            'weekly_hours' => $request->weekly_hours,
+            'hire_date' => now(),
+            'employment_status' => 'pending'
+        ]);
+
+        $user = User::create([
+            'email' => $request->email,
+            'password' => Hash::make($request->password),
+            'role' => 'teacher',
+            'phone' => $request->phone,
+            'teacher_id' => $teacher->id,
+            'is_active' => false,   
+            'password_changed_at' => now()
+        ]);
+
+        //  1. إرسال كود تفعيل البريد
+        $code = $user->generateVerificationCode();
+        $this->sendVerificationEmail($user, $code);
+
+        //  2. إرسال إيميل استلام الطلب
+        $this->sendRegistrationReceivedEmail($user);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'تم التسجيل بنجاح. يرجى تفعيل بريدك الإلكتروني. بعد التفعيل، سيتم مراجعة طلبك من قبل الإدارة.',
+            'data' => [
+                'user_id' => $user->id,
+                'teacher_id' => $teacher->teacher_id,
+                'requires_verification' => true,
+                'status' => 'pending_verification'
+            ]
+        ], 201);
+
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'حدث خطأ أثناء التسجيل'
+        ], 500);
+    }
+}
+
+
+    /**
+     * تفعيل البريد الإلكتروني
+     */
+    public function verifyAccount(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'email' => 'required|email',
+            'code' => 'required|string|size:6'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        $user = User::where('email', $request->email)->first();
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'المستخدم غير موجود'
+            ], 404);
+        }
+
+        if ($user->verifyCode($request->code)) {
+            return response()->json([
+                'success' => true,
+                'message' => 'تم تفعيل البريد الإلكتروني بنجاح'
+            ]);
+        }
+
+        return response()->json([
+            'success' => false,
+            'message' => 'رمز التحقق غير صحيح أو منتهي الصلاحية'
+        ], 400);
+    }
+
+    /**
+     * إعادة إرسال كود التفعيل
+     */
+    public function resendVerificationCode(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'email' => 'required|email'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        $user = User::where('email', $request->email)->first();
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'المستخدم غير موجود'
+            ], 404);
+        }
+
+        if ($user->isVerified()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'البريد مفعل مسبقاً'
+            ], 400);
+        }
+
+        $code = $user->generateVerificationCode();
+        $this->sendVerificationEmail($user, $code);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'تم إرسال كود تفعيل جديد'
+        ]);
+    }
+    
+
+    /**
+     * تسجيل الخروج
+     */
+    public function logout(Request $request)
+    {
+        $allDevices = $request->input('all_devices', false);
+        $result = $this->authService->logout($request->user(), $allDevices);
+        return response()->json($result);
+    }
+
+    /**
+     * الملف الشخصي
+     */
+    public function profile(Request $request)
+    {
+        $user = $request->user();
+        
+        if ($user->isTeacher()) {
+            $user->load('teacher');
+        }
+        if ($user->isStudent()) {
+            $user->load('student');
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $this->formatUserResponse($user)
+        ]);
+    }
+
+    /**
+     * تغيير كلمة المرور
+     */
+    public function changePassword(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'current_password' => 'required|string',
+            'new_password' => 'required|string|min:8|confirmed'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        $result = $this->authService->changePassword(
+            $request->user(),
+            $request->current_password,
+            $request->new_password
+        );
+
+        return response()->json($result, $result['success'] ? 200 : 400);
+    }
+
+    /**
+     * نسيت كلمة المرور
+     */
+    public function forgotPassword(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'email' => 'required|email'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        $result = $this->authService->requestPasswordReset($request->email);
+
+        if (isset($result['data']['token'])) {
+            $user = User::where('email', $request->email)->first();
+            if ($user) {
+                $this->sendPasswordResetEmail($user, $result['data']['token'], $result['data']['code']);
+            }
+        }
+
+        return response()->json($result);
+    }
+
+    /**
+     * إعادة تعيين كلمة المرور
+     */
+    public function resetPassword(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'token' => 'required|string',
+            'code' => 'required|string|size:6',
+            'password' => 'required|string|min:8|confirmed'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        $result = $this->authService->confirmPasswordReset(
+            $request->token,
+            $request->code,
+            $request->password
+        );
+
+        return response()->json($result, $result['success'] ? 200 : 400);
+    }
+
+    /**
+     * الأجهزة النشطة
+     */
+    public function activeDevices(Request $request)
+    {
+        $result = $this->authService->getActiveDevices($request->user());
+        return response()->json($result);
+    }
+
+    /**
+     * إلغاء جهاز
+     */
+    public function revokeDevice(Request $request, string $tokenId)
+    {
+        $result = $this->authService->revokeDevice($request->user(), $tokenId);
+        return response()->json($result, $result['success'] ? 200 : 400);
+    }
+
+    // ========== دوال مساعدة ==========
+    
+    private function generateStudentId(): string
+    {
+        $year = date('Y');
+        $count = Student::whereYear('created_at', $year)->count() + 1;
+        return 'STU' . $year . str_pad($count, 4, '0', STR_PAD_LEFT);
+    }
+
+    private function generateTeacherId(): string
+    {
+        $year = date('Y');
+        $count = Teacher::whereYear('created_at', $year)->count() + 1;
+        return 'TCH' . $year . str_pad($count, 4, '0', STR_PAD_LEFT);
+    }
+
+    private function sendVerificationEmail(User $user, string $code): void
+    {
+        $message = "مرحباً {$user->full_name}!\n\n";
+        $message .= "كود تفعيل البريد الإلكتروني: {$code}\n\n";
+        $message .= "هذا الكود صالح لمدة 30 دقيقة.\n\n";
+        $message .= "نظام إدارة المدرسة";
+
+        Mail::raw($message, function ($mail) use ($user) {
+            $mail->to($user->email)->subject('تفعيل البريد الإلكتروني');
+        });
+    }
+
+  private function sendRegistrationReceivedEmail(User $user): void
+{
+    $role = $user->isTeacher() ? 'معلم' : 'طالب';
+    
+    $message = "مرحباً {$user->full_name}!\n\n";
+    $message .= "تم استلام طلب تسجيلك {$role} في نظام إدارة المدرسة بنجاح.\n\n";
+    $message .= "✅ الخطوة 1: يرجى تفعيل بريدك الإلكتروني أولاً باستخدام الكود المرسل إليك.\n";
+    $message .= "✅ الخطوة 2: بعد تفعيل بريدك، سيتم مراجعة طلبك من قبل الإدارة.\n\n";
+    $message .= "شكراً لصبرك!\n\n";
+    $message .= "نظام إدارة المدرسة";
+
+    Mail::raw($message, function ($mail) use ($user) {
+        $mail->to($user->email)->subject('تم استلام طلب التسجيل - يرجى تفعيل بريدك');
+    });
+}
+
+    private function sendPasswordResetEmail(User $user, string $token, string $code): void
+    {
+        $message = "مرحباً {$user->full_name}!\n\n";
+        $message .= "كود إعادة تعيين كلمة المرور: {$code}\n\n";
+        $message .= "هذا الكود صالح لمدة ساعتين.\n\n";
+        $message .= "إذا لم تطلب إعادة تعيين كلمة المرور، تجاهل هذا البريد.\n\n";
+        $message .= "نظام إدارة المدرسة";
+
+        Mail::raw($message, function ($mail) use ($user) {
+            $mail->to($user->email)->subject('إعادة تعيين كلمة المرور');
+        });
+    }
+
+    private function formatUserResponse(User $user): array
+    {
+        $response = [
+            'id' => $user->id,
+            'email' => $user->email,
+            'role' => $user->role,
+            'phone' => $user->phone,
+            'is_active' => $user->is_active,
+            'full_name' => $user->full_name,
+            'email_verified' => $user->isVerified()
+        ];
+        if ($user->isAdmin()) {
+            $response['profile'] = [
+                'role' => 'مدير النظام',
+                'access_level' => 'full'
+            ];
+            return $response;
+        }
+
+        if ($user->isTeacher() && $user->teacher) {
+            $response['profile'] = [
+                'teacher_id' => $user->teacher->teacher_id,
+                'specialization' => $user->teacher->specialization,
+                'education_level' => $user->teacher->education_level,
+                'employment_status' => $user->teacher->employment_status
+            ];
+        } 
+        if ($user->isStudent() && $user->student) {
+            $response['profile'] = [
+                'student_id' => $user->student->student_id,
+                'education_level' => $user->student->education_level,
+                'grade' => $user->student->grade,
+                'section' => $user->student->section,
+                'enrollment_status' => $user->student->enrollment_status,
+                'wallet_balance' => $user->student->wallet_balance
+            ];
+        } 
+
+        return $response;
+    }
+
+    /**
+     * ✅ سجل محاولات الدخول (جديد)
+     * GET /api/v1/login-history
+    */
+    public function loginHistory(Request $request)
+    {
+        $user = $request->user();
+
+        $history = LoginHistory::byUser($user->id)
+            ->latest()
+            ->take(50)
+            ->get()
+            ->map(function ($log) {
+                return [
+                    'id' => $log->id,
+                    'date' => $log->created_at->format('Y-m-d H:i'),
+                    'time_ago' => $log->created_at->diffForHumans(),
+                    'ip' => $log->ip_address,
+                    'device' => $log->device_type,
+                    'browser' => $log->user_agent,
+                    'status' => $log->status,
+                    'status_icon' => match($log->status) {
+                        'success' => '✅',
+                        'failed' => '❌',
+                        'locked' => '🔒',
+                        'auto_logout' => '⏰',
+                        default => '❓'
+                    },
+                    'status_text' => match($log->status) {
+                        'success' => 'دخول ناجح',
+                        'failed' => 'محاولة فاشلة',
+                        'locked' => 'حساب مقفل',
+                        'auto_logout' => 'خروج تلقائي',
+                        default => 'غير معروف'
+                    }
+                ];
+            });
+
+            // إحصائيات
+            $stats = [
+                'total_logins' => LoginHistory::byUserwhere('user_id', $user->id)->successful()->count(),
+                'failed_attempts' => LoginHistory::byUserwhere('user_id', $user->id)->failed()->count(),
+                'today_logins' => LoginHistory::byUserwhere('user_id', $user->id)->successful()->today()->count(),
+                'last_login' => LoginHistory::byUserwhere('user_id', $user->id)->successful()->latest()->first()?->created_at?->diffForHumans(),
+        ];
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'history' => $history,
+                'stats' => $stats
+            ]
+        ]);
+    }
+
+
+}
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Http\Controllers\Controller;
+use App\Models\User;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+
+class BiometricAuthController extends Controller
+{
+    /**
+     * تسجيل بصمة جديدة (للحساب الحالي)
+     */
+    public function registerOptions(Request $request)
+    {
+        $user = $request->user();
+        
+        try {
+            $options = $user->createAttestationOptions();
+            session(['webauthn_register' => $options]);
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'تم إنشاء خيارات التسجيل',
+                'data' => $options->toArray()
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'فشل إنشاء خيارات التسجيل'
+            ], 500);
+        }
+    }
+
+    /**
+     * تأكيد تسجيل البصمة
+     */
+    public function registerConfirm(Request $request)
+    {
+        $user = $request->user();
+        $options = session('webauthn_register');
+        
+        if (!$options) {
+            return response()->json([
+                'success' => false,
+                'message' => 'انتهت صلاحية الجلسة'
+            ], 400);
+        }
+        
+        try {
+            $credential = $user->createCredential(
+                $options,
+                $request->input('credential')
+            );
+            
+            $user->addCredential($credential);
+            session()->forget('webauthn_register');
+            
+            return response()->json([
+                'success' => true,
+                'message' => '🎉 تم تسجيل بصمتك بنجاح!'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'فشل تأكيد البصمة'
+            ], 400);
+        }
+    }
+
+    /**
+     * الدخول بالبصمة
+     */
+    public function loginOptions(Request $request)
+    {
+        $request->validate(['email' => 'required|email']);
+        
+        $user = User::where('email', $request->email)->first();
+        
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'المستخدم غير موجود'
+            ], 404);
+        }
+        
+        try {
+            $options = $user->createAssertionOptions();
+            session([
+                'webauthn_login' => $options,
+                'webauthn_user_id' => $user->id
+            ]);
+            
+            return response()->json([
+                'success' => true,
+                'data' => $options->toArray()
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'فشل إنشاء خيارات الدخول'
+            ], 500);
+        }
+    }
+
+    /**
+     * تأكيد الدخول بالبصمة
+     */
+    public function loginConfirm(Request $request)
+    {
+        $options = session('webauthn_login');
+        $userId = session('webauthn_user_id');
+        
+        if (!$options || !$userId) {
+            return response()->json([
+                'success' => false,
+                'message' => 'انتهت صلاحية الجلسة'
+            ], 400);
+        }
+        
+        try {
+            $user = User::findOrFail($userId);
+            
+            $credential = $user->validateAssertion(
+                $options,
+                $request->input('credential')
+            );
+            
+            if (!$credential) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'فشل التحقق من البصمة'
+                ], 401);
+            }
+            
+            Auth::login($user);
+            $token = $user->createToken('biometric_auth')->plainTextToken;
+            
+            session()->forget(['webauthn_login', 'webauthn_user_id']);
+            
+            return response()->json([
+                'success' => true,
+                'message' => '👆 تم الدخول بالبصمة بنجاح!',
+                'data' => [
+                    'user' => [
+                        'id' => $user->id,
+                        'email' => $user->email,
+                        'full_name' => $user->full_name,
+                        'role' => $user->role
+                    ],
+                    'token' => $token
+                ]
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'فشل الدخول بالبصمة'
+            ], 401);
+        }
+    }
+
+    /**
+     * عرض البصمات المسجلة
+     */
+    public function credentials(Request $request)
+    {
+        $credentials = $request->user()
+            ->credentials()
+            ->get()
+            ->map(function ($credential) {
+                return [
+                    'id' => $credential->getKey(),
+                    'name' => $credential->name ?? 'بصمة',
+                    'created_at' => $credential->created_at->format('Y-m-d H:i'),
+                    'last_used_at' => optional($credential->last_used_at)->format('Y-m-d H:i')
+                ];
+            });
+        
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'credentials' => $credentials,
+                'has_biometric' => $request->user()->hasCredentials()
+            ]
+        ]);
+    }
+
+    /**
+     * حذف بصمة
+     */
+    public function deleteCredential(Request $request, $credentialId)
+    {
+        $request->user()->removeCredential($credentialId);
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'تم حذف البصمة بنجاح'
+        ]);
+    }
+}
+<?php
+
+namespace App\Http\Controllers;
+
+abstract class Controller
+{
+    //
+}
+<?php
+
+namespace App\Http\Controllers\WebAuthn;
+
+use Illuminate\Contracts\Support\Responsable;
+use Illuminate\Http\Response;
+use Laragear\WebAuthn\Http\Requests\AssertedRequest;
+use Laragear\WebAuthn\Http\Requests\AssertionRequest;
+
+use function response;
+
+class WebAuthnLoginController
+{
+    /**
+     * Returns the challenge to assertion.
+     */
+    public function options(AssertionRequest $request): Responsable
+    {
+        return $request->toVerify($request->validate(['email' => 'sometimes|email|string']));
+    }
+
+    /**
+     * Log the user in.
+     */
+    public function login(AssertedRequest $request): Response
+    {
+        return response()->noContent($request->login() ? 204 : 422);
+    }
+}
+<?php
+
+namespace App\Http\Controllers\WebAuthn;
+
+use Illuminate\Contracts\Support\Responsable;
+use Illuminate\Http\Response;
+use Laragear\WebAuthn\Http\Requests\AttestationRequest;
+use Laragear\WebAuthn\Http\Requests\AttestedRequest;
+
+use function response;
+
+class WebAuthnRegisterController
+{
+    /**
+     * Returns a challenge to be verified by the user device.
+     */
+    public function options(AttestationRequest $request): Responsable
+    {
+        return $request
+            ->fastRegistration()
+//            ->userless()
+//            ->allowDuplicates()
+            ->toCreate();
+    }
+
+    /**
+     * Registers a device for further WebAuthn authentication.
+     */
+    public function register(AttestedRequest $request): Response
+    {
+        $request->save();
+
+        return response()->noContent();
+    }
+}
+<?php
+// app/Http/Middleware/CheckActive.php
+
+namespace App\Http\Middleware;
+
+use Closure;
+use Illuminate\Http\Request;
+
+class CheckActive
+{
+    public function handle(Request $request, Closure $next)
+    {
+        if (!$request->user()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'يجب تسجيل الدخول أولاً'
+            ], 401);
+        }
+
+        if (!$request->user()->is_active) {
+            $request->user()->currentAccessToken()->delete();
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'حسابك غير مفعل، يرجى التواصل مع الإدارة'
+            ], 403);
+        }
+
+        return $next($request);
+    }
+}
+<?php
+// app/Http/Middleware/CheckForceLogout.php
+
+namespace App\Http\Middleware;
+
+use Closure;
+use Illuminate\Http\Request;
+
+class CheckForceLogout
+{
+    public function handle(Request $request, Closure $next)
+    {
+        $user = $request->user();
+        
+        if ($user && $user->checkForceLogout()) {
+            $user->currentAccessToken()->delete();
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'تم تغيير كلمة المرور. يرجى تسجيل الدخول مرة أخرى.',
+                'code' => 'force_logout'
+            ], 401);
+        }
+
+        return $next($request);
+    }
+}
+<?php
+// app/Http/Middleware/CheckRole.php
+
+namespace App\Http\Middleware;
+
+use Closure;
+use Illuminate\Http\Request;
+
+class CheckRole
+{
+    public function handle(Request $request, Closure $next, ...$roles)
+    {
+        if (!$request->user()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'يجب تسجيل الدخول أولاً'
+            ], 401);
+        }
+
+        if (!in_array($request->user()->role, $roles)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'غير مصرح لك بالوصول إلى هذا المورد'
+            ], 403);
+        }
+
+        return $next($request);
+    }
+}
+<?php
+// app/Http/Middleware/CheckVerified.php
+
+namespace App\Http\Middleware;
+
+use Closure;
+use Illuminate\Http\Request;
+
+class CheckVerified
+{
+    public function handle(Request $request, Closure $next)
+    {
+        if (!$request->user()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'يجب تسجيل الدخول أولاً'
+            ], 401);
+        }
+
+        if (!$request->user()->isVerified()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'يرجى تفعيل بريدك الإلكتروني أولاً',
+                'code' => 'email_not_verified'
+            ], 403);
+        }
+
+        return $next($request);
+    }
+}
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+
+class LoginHistory extends Model
+{
+    protected $fillable = [
+        'user_id',
+        'ip_address',
+        'user_agent',
+        'device_type',
+        'status',
+        'location'
+    ];
+
+    protected $casts = [
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
+    ];
+
+    // العلاقة مع المستخدم
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    // Scopes مفيدة
+    public function scopeSuccessful($query)
+    {
+        return $query->where('status', 'success');
+    }
+
+    public function scopeFailed($query)
+    {
+        return $query->where('status', 'failed');
+    }
+
+    public function scopeToday($query)
+    {
+        return $query->whereDate('created_at', today());
+    }
+
+    public function scopeByUser($query, $userId)
+    {
+        return $query->where('user_id', $userId);
+    }
+}
+<?php
+// app/Models/PasswordReset.php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+
+class PasswordReset extends Model
+{
+    protected $fillable = [
+        'email',
+        'token',
+        'code',
+        'used',
+        'expires_at'
+    ];
+
+    protected $casts = [
+        'used' => 'boolean',
+        'expires_at' => 'datetime',
+    ];
+
+    public function isValid(): bool
+    {
+        return !$this->used && $this->expires_at->isFuture();
+    }
+
+    public function markAsUsed(): void
+    {
+        $this->update(['used' => true]);
+    }
+
+    public function isExpired(): bool
+    {
+        return $this->expires_at->isPast();
+    }
+}
+<?php
+// app/Models/Student.php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
+
+class Student extends Model
+{
+    use HasFactory, SoftDeletes;
+
+    protected $fillable = [
+        'first_name', 'father_name', 'mother_name', 'last_name', 'student_id',
+        'birth_date', 'gender', 'education_level', 'grade', 'section',
+        'address', 'guardian_phone', 'guardian_email', 'guardian_relation',
+        'health_status', 'legal_document_path', 'bus_id',
+        'enrollment_status', 'enrollment_date', 'wallet_balance'
+    ];
+
+    protected $casts = [
+        'birth_date' => 'date',
+        'enrollment_date' => 'date',
+        'wallet_balance' => 'decimal:2',
+    ];
+
+    public function user()
+    {
+        return $this->hasOne(User::class, 'student_id');
+    }
+
+    public function getFullNameAttribute(): string
+    {
+        return $this->first_name . ' ' . $this->father_name . ' ' . $this->last_name;
+    }
+}
+<?php
+// app/Models/Teacher.php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
+
+class Teacher extends Model
+{
+    use HasFactory, SoftDeletes;
+
+    protected $fillable = [
+        'first_name', 'middle_name', 'last_name', 'teacher_id', 'national_id',
+        'birth_date', 'gender', 'address', 'health_status', 'specialization',
+        'education_level', 'high_school_branch', 'is_class_teacher',
+        'years_of_experience', 'weekly_hours', 'hire_date',
+        'cv_path', 'legal_document_path', 'employment_status', 'rating'
+    ];
+
+    protected $casts = [
+        'birth_date' => 'date',
+        'hire_date' => 'date',
+        'is_class_teacher' => 'boolean',
+        'rating' => 'decimal:2',
+    ];
+
+    public function user()
+    {
+        return $this->hasOne(User::class, 'teacher_id');
+    }
+
+    public function getFullNameAttribute(): string
+    {
+        return $this->first_name . ' ' . $this->last_name;
+    }
+}
+<?php
+// app/Models/User.php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Notifications\Notifiable;
+use Laravel\Sanctum\HasApiTokens;
+use Laragear\WebAuthn\Contracts\WebAuthnAuthenticatable; 
+use Laragear\WebAuthn\WebAuthnAuthentication;
+
+
+class User extends Authenticatable implements WebAuthnAuthenticatable
+{
+    use  HasApiTokens;
+    use HasFactory, Notifiable, SoftDeletes;
+     use WebAuthnAuthentication;
+
+    protected $fillable = [
+        'email',
+        'password',
+        'role',
+        'phone',
+        'device_token',
+        'is_active',
+        'email_verified_at',
+        'last_login_at',
+        'last_login_ip',
+        'teacher_id',
+        'student_id',
+        'verification_code',
+        'verification_expires_at',
+        'password_changed_at',
+        'failed_attempts',
+        'locked_until',
+        'active_tokens',
+        'force_logout',
+        'force_logout_at'
+    ];
+
+    protected $hidden = [
+        'password',
+        'remember_token',
+        'verification_code',
+    ];
+
+    protected $casts = [
+        'is_active' => 'boolean',
+        'email_verified_at' => 'datetime',
+        'last_login_at' => 'datetime',
+        'verification_expires_at' => 'datetime',
+        'password_changed_at' => 'datetime',
+        'locked_until' => 'datetime',
+        'force_logout' => 'boolean',
+        'force_logout_at' => 'datetime',
+        'active_tokens' => 'array',
+    ];
+
+    // العلاقات
+    public function teacher()
+    {
+        return $this->belongsTo(Teacher::class);
+    }
+
+    public function student()
+    {
+        return $this->belongsTo(Student::class);
+    }
+
+    //الأدوار
+    public function isTeacher(): bool
+    {
+        return $this->role === 'teacher';
+    }
+
+    public function isStudent(): bool
+    {
+        return $this->role === 'student';
+    }
+    public function isAdmin(): bool
+{
+    return $this->role === 'admin';
+}
+
+
+    public function getFullNameAttribute(): string
+    {
+        if ($this->isAdmin()) {
+            return 'مدير النظام';
+    }
+        $profile = $this->profile();
+        return $profile ? $profile->first_name . ' ' . $profile->last_name : 'مستخدم';
+    }
+
+    public function profile()
+    {
+        if ($this->isAdmin()) {
+            return null;  
+        }
+        if ($this->isTeacher()) return $this->teacher;
+        if ($this->isStudent()) return $this->student;
+    
+        return null;
+    }
+
+
+    // ========== إدارة التوكنات والجلسات ==========
+    public function logoutAllDevices(): void
+    {
+        $this->tokens()->delete();
+        $this->update([
+            'active_tokens' => null,
+            'force_logout' => false,
+            'force_logout_at' => null
+        ]);
+    }
+
+    public function logoutOtherDevices(): void
+    {
+        $currentTokenId = request()->user()?->currentAccessToken()?->id;
+        if ($currentTokenId) {
+            $this->tokens()->where('id', '!=', $currentTokenId)->delete();
+        }
+    }
+
+        // ========== تسجيل الخروج الإجباري ==========
+    public function checkForceLogout():bool
+    {
+        if (!$this->force_logout) {
+            return false;
+        }
+        
+        if ($this->password_changed_at && $this->force_logout_at) {
+            return $this->force_logout_at->gt($this->password_changed_at);
+        }
+        
+        return true;
+    }
+
+    public function addActiveToken(string $tokenId, array $info = []): void
+    {
+        $tokens = $this->active_tokens ?? [];
+        $tokens[$tokenId] = [
+            'device' => $info['device'] ?? 'Unknown',
+            'device_type' => $info['device_type'] ?? 'web',
+            'browser' => $info['browser'] ?? null,
+            'os' => $info['os'] ?? null,
+            'ip' => request()->ip(),
+            'created_at' => now()->toDateTimeString(),
+            'last_activity' => now()->toDateTimeString()
+        ];
+        
+        if (count($tokens) > 10) {
+            $tokens = array_slice($tokens, -10, 10, true);
+        }
+        
+        $this->update(['active_tokens' => $tokens]);
+    }
+
+    public function revokeToken(string $tokenId): bool
+    {
+        $deleted = $this->tokens()->where('id', $tokenId)->delete();
+        
+        if ($deleted) {
+            $tokens = $this->active_tokens ?? [];
+            unset($tokens[$tokenId]);
+            $this->update(['active_tokens' => $tokens]);
+        }
+        
+        return $deleted > 0;
+    }
+
+    public function getActiveDevices(): array
+    {
+        $devices = [];
+        $currentTokenId = request()->user()?->currentAccessToken()?->id;
+        
+        foreach ($this->tokens as $token) {
+            $tokenInfo = $this->active_tokens[$token->id] ?? null;
+            
+            $devices[] = [
+                'id' => $token->id,
+                'name' => $token->name,
+                'device' => $tokenInfo['device'] ?? 'Unknown',
+                'device_type' => $tokenInfo['device_type'] ?? 'web',
+                'browser' => $tokenInfo['browser'] ?? null,
+                'os' => $tokenInfo['os'] ?? null,
+                'ip' => $tokenInfo['ip'] ?? null,
+                'is_current' => $token->id === $currentTokenId,
+                'last_activity' => $tokenInfo['last_activity'] ?? $token->created_at->toDateTimeString(),
+                'created' => $token->created_at->diffForHumans()
+            ];
+        }
+        
+        return $devices;
+    }
+
+
+
+    // ========== الحماية من محاولات الدخول ==========
+    public function recordFailedAttempt(): void
+    {
+        $this->increment('failed_attempts');
+        
+        if ($this->failed_attempts >= 5) {
+            $this->update(['locked_until' => now()->addMinutes(30)]);
+        }
+    }
+
+    public function resetFailedAttempts(): void
+    {
+        $this->update([
+            'failed_attempts' => 0,
+            'locked_until' => null
+        ]);
+    }
+
+    public function isLocked(): bool
+    {
+        if (!$this->locked_until) {
+            return false;
+        }
+        
+        if ($this->locked_until->isPast()) {
+            $this->update(['locked_until' => null]);
+            return false;
+        }
+        
+        return true;
+    }
+
+    public function getLockRemainingMinutes(): int
+    {
+        return $this->locked_until?->diffInMinutes(now()) ?? 0;
+    }
+
+    public function getRemainingAttempts(): int
+    {
+        return max(0, 5 - $this->failed_attempts);
+    }
+
+    //  تفعيل البريد الإلكتروني 
+    public function generateVerificationCode(): string
+    {
+        $code = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+        
+        $this->update([
+            'verification_code' => $code,
+            'verification_expires_at' => now()->addMinutes(30)
+        ]);
+        
+        return $code;
+    }
+
+    public function verifyCode(string $code): bool
+    {
+        if (!$this->verification_code || !$this->verification_expires_at) {
+            return false;
+        }
+        
+        if ($this->verification_expires_at->isPast()) {
+            return false;
+        }
+        
+        if ($this->verification_code !== $code) {
+            return false;
+        }
+        
+        $this->update([
+            'email_verified_at' => now(),
+            'verification_code' => null,
+            'verification_expires_at' => null
+        ]);
+        
+        return true;
+    }
+
+    public function isVerified(): bool
+    {
+        return !is_null($this->email_verified_at);
+    }
+
+
+    //  تسجيل الدخول 
+    public function recordLogin(array $deviceInfo = []): void
+    {
+        $this->update([
+            'last_login_at' => now(),
+            'last_login_ip' => request()->ip(),
+            'device_token' => $deviceInfo['device_token'] ?? $this->device_token
+        ]);
+    }
+
+    //  Scopes 
+    public function scopeActive($query)
+    {
+        return $query->where('is_active', true);
+    }
+
+    public function scopeByRole($query, string $role)
+    {
+        return $query->where('role', $role);
+    }
+
+    public function scopeVerified($query)
+    {
+        return $query->whereNotNull('email_verified_at');
+    }
+
+    public function scopeUnverified($query)
+    {
+        return $query->whereNull('email_verified_at');
+    }
+
+    public function scopeLocked($query)
+    {
+        return $query->where('locked_until', '>', now());
+    }
+
+}
+<?php
+
+namespace App\Providers;
+
+use Illuminate\Support\ServiceProvider;
+
+class AppServiceProvider extends ServiceProvider
+{
+    /**
+     * Register any application services.
+     */
+    public function register(): void
+    {
+        //
+    }
+
+    /**
+     * Bootstrap any application services.
+     */
+    public function boot(): void
+    {
+        //
+    }
+}
+<?php
+
+namespace App\Services;
+
+use App\Models\User;
+use App\Models\LoginHistory;
+use App\Models\PasswordReset;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Str;
+
+
+class AuthService
+{
+    /**
+     * تسجيل الدخول (مع Remember Me + Login History)
+     */
+    public function login(string $email, string $password, array $deviceInfo = []): array
+    {
+        $user = User::where('email', $email)->first();
+
+        if (!$user) {
+            // ✅ تسجيل محاولة فاشلة (مستخدم غير موجود)
+            LoginHistory::create([
+                'user_id' => 0,
+                'ip_address' => request()->ip(),
+                'user_agent' => request()->userAgent(),
+                'device_type' => $deviceInfo['device_type'] ?? 'unknown',
+                'status' => 'failed',
+            ]);
+
+            return [
+                'success' => false,
+                'message' => 'البريد الإلكتروني أو كلمة المرور غير صحيحة'
+            ];
+        }
+
+        // التحقق من قفل الحساب
+        if ($user->isLocked()) {
+            // ✅ تسجيل محاولة مقفولة
+            LoginHistory::create([
+                'user_id' => $user->id,
+                'ip_address' => request()->ip(),
+                'user_agent' => request()->userAgent(),
+                'device_type' => $deviceInfo['device_type'] ?? 'unknown',
+                'status' => 'locked',
+            ]);
+
+            return [
+                'success' => false,
+                'message' => 'الحساب مقفل. حاول بعد ' . $user->getLockRemainingMinutes() . ' دقيقة'
+            ];
+        }
+
+        // التحقق من تفعيل الحساب (من قبل المدير)
+        if (!$user->is_active) {
+            return [
+                'success' => false,
+                'message' => 'الحساب غير مفعل. في انتظار موافقة الإدارة'
+            ];
+        }
+
+        // التحقق من كلمة المرور
+        if (!Hash::check($password, $user->password)) {
+            $user->recordFailedAttempt();
+
+            // ✅ تسجيل محاولة فاشلة
+            LoginHistory::create([
+                'user_id' => $user->id,
+                'ip_address' => request()->ip(),
+                'user_agent' => request()->userAgent(),
+                'device_type' => $deviceInfo['device_type'] ?? 'unknown',
+                'status' => 'failed',
+            ]);
+
+            $remaining = $user->getRemainingAttempts();
+
+            if ($user->isLocked()) {
+                return [
+                    'success' => false,
+                    'message' => 'تم قفل الحساب لمدة 30 دقيقة'
+                ];
+            }
+
+            return [
+                'success' => false,
+                'message' => 'كلمة المرور غير صحيحة. متبقي ' . $remaining . ' محاولات'
+            ];
+        }
+
+        // إعادة تعيين المحاولات الفاشلة
+        $user->resetFailedAttempts();
+
+        // ✅ REMEMBER ME - تحديد مدة التوكن
+        $remember = $deviceInfo['remember'] ?? false;
+        $expiration = $remember
+            ? now()->addDays(30)  // شهر كامل
+            : now()->addHours(2); // ساعتين فقط
+
+        // إنشاء توكن
+        $token = $user->createToken('auth_token', ['*'], $expiration)->plainTextToken;
+        $tokenId = explode('|', $token)[0];
+
+        // ✅ تخزين remember token إذا طلب ذلك
+        if ($remember) {
+            $user->update([
+                'remember_token' => Str::random(60),
+                'remember_expires_at' => now()->addDays(30),
+            ]);
+        }
+
+        // تسجيل الجهاز في القائمة النشطة
+        $user->addActiveToken($tokenId, $deviceInfo);
+
+        // تحديث معلومات الدخول
+        $user->recordLogin($deviceInfo);
+
+        // ✅ تسجيل دخول ناجح في Login History
+        LoginHistory::create([
+            'user_id' => $user->id,
+            'ip_address' => request()->ip(),
+            'user_agent' => request()->userAgent(),
+            'device_type' => $deviceInfo['device_type'] ?? 'unknown',
+            'status' => 'success',
+        ]);
+
+        return [
+            'success' => true,
+            'message' => $remember ? 'تم تسجيل الدخول مع تذكرني' : 'تم تسجيل الدخول بنجاح',
+            'data' => [
+                'user' => $this->formatUser($user),
+                'token' => $token,
+                'remember' => $remember,
+                'expires_in' => $remember ? '30 يوم' : 'ساعتين'
+            ]
+        ];
+    }
+
+    /**
+     * تسجيل الخروج
+     */
+    public function logout(User $user, bool $allDevices = false): array
+    {
+        if ($allDevices) {
+            $user->tokens()->delete();
+            $message = 'تم تسجيل الخروج من جميع الأجهزة';
+        } else {
+            $currentTokenId = request()->user()->currentAccessToken()->id;
+            $user->revokeToken($currentTokenId);
+            $message = 'تم تسجيل الخروج بنجاح';
+        }
+
+        return [
+            'success' => true,
+            'message' => $message
+        ];
+    }
+
+    /**
+     * تغيير كلمة المرور (مع فحص القوة + تنبيه أمان)
+     */
+    public function changePassword(User $user, string $currentPassword, string $newPassword): array
+    {
+        // ✅ فحص قوة كلمة المرور الجديدة
+        $passwordService = new PasswordStrengthService();
+        $strengthResult = $passwordService->validate($newPassword);
+
+        if (!$strengthResult['is_valid']) {
+            return [
+                'success' => false,
+                'message' => 'كلمة المرور ليست قوية بما يكفي',
+                'errors' => $strengthResult['feedback']
+            ];
+        }
+
+        // ✅ فحص الحد الأدنى للطول
+        if (strlen($newPassword) < 8) {
+            return [
+                'success' => false,
+                'message' => 'كلمة المرور يجب أن تكون 8 أحرف على الأقل'
+            ];
+        }
+
+        // ✅ التحقق من كلمة المرور الحالية
+        if (!Hash::check($currentPassword, $user->password)) {
+            return [
+                'success' => false,
+                'message' => 'كلمة المرور الحالية غير صحيحة'
+            ];
+        }
+
+        // ✅ تحديث كلمة المرور
+        $user->update([
+            'password' => Hash::make($newPassword),
+            'password_changed_at' => now()
+        ]);
+
+        // ✅ حذف جميع الجلسات الأخرى (يبقى الجهاز الحالي فقط)
+        $user->tokens()->where('id', '!=', request()->user()->currentAccessToken()->id)->delete();
+
+        // ✅ إرسال تنبيه أمني بالإيميل
+        try {
+            $this->sendSecurityAlert($user);
+        } catch (\Exception $e) {
+            \Log::error('فشل إرسال تنبيه الأمان: ' . $e->getMessage());
+        }
+
+        return [
+            'success' => true,
+            'message' => 'تم تغيير كلمة المرور بنجاح. تم إرسال تنبيه أمني إلى بريدك.',
+            'data' => [
+                'password_strength' => $strengthResult
+            ]
+        ];
+    }
+
+    /**
+     * طلب إعادة تعيين كلمة المرور
+     */
+    public function requestPasswordReset(string $email): array
+    {
+        $user = User::where('email', $email)->first();
+
+        if (!$user) {
+            return [
+                'success' => true,
+                'message' => 'إذا كان البريد مسجلاً، سيصلك رابط إعادة التعيين'
+            ];
+        }
+
+        PasswordReset::where('email', $email)->delete();
+
+        $token = Str::random(64);
+        $code = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+
+        PasswordReset::create([
+            'email' => $email,
+            'token' => $token,
+            'code' => $code,
+            'expires_at' => now()->addHours(2)
+        ]);
+
+        return [
+            'success' => true,
+            'message' => 'تم إرسال رابط إعادة التعيين إلى بريدك الإلكتروني',
+            'data' => [
+                'token' => $token,
+                'code' => $code
+            ]
+        ];
+    }
+
+    /**
+     * تأكيد إعادة تعيين كلمة المرور
+     */
+    public function confirmPasswordReset(string $token, string $code, string $newPassword): array
+    {
+        $reset = PasswordReset::where('token', $token)
+            ->where('code', $code)
+            ->where('used', false)
+            ->first();
+
+        if (!$reset) {
+            return [
+                'success' => false,
+                'message' => 'رمز التحقق غير صحيح'
+            ];
+        }
+
+        if ($reset->expires_at->isPast()) {
+            return [
+                'success' => false,
+                'message' => 'انتهت صلاحية الرابط'
+            ];
+        }
+
+        $user = User::where('email', $reset->email)->first();
+
+        if (!$user) {
+            return [
+                'success' => false,
+                'message' => 'المستخدم غير موجود'
+            ];
+        }
+
+        $user->update([
+            'password' => Hash::make($newPassword),
+            'password_changed_at' => now()
+        ]);
+
+        $user->tokens()->delete();
+        $reset->markAsUsed();
+
+        return [
+            'success' => true,
+            'message' => 'تم إعادة تعيين كلمة المرور بنجاح'
+        ];
+    }
+
+    /**
+     * الحصول على الأجهزة النشطة
+     */
+    public function getActiveDevices(User $user): array
+    {
+        $devices = [];
+        $currentTokenId = request()->user()->currentAccessToken()->id;
+
+        foreach ($user->tokens as $token) {
+            $devices[] = [
+                'id' => $token->id,
+                'name' => $token->name,
+                'is_current' => $token->id === $currentTokenId,
+                'last_used' => $token->last_used_at?->diffForHumans(),
+                'created' => $token->created_at->diffForHumans()
+            ];
+        }
+
+        return [
+            'success' => true,
+            'data' => [
+                'devices' => $devices,
+                'total' => count($devices)
+            ]
+        ];
+    }
+
+    /**
+     * إلغاء جهاز محدد
+     */
+    public function revokeDevice(User $user, string $tokenId): array
+    {
+        if ($tokenId === request()->user()->currentAccessToken()->id) {
+            return [
+                'success' => false,
+                'message' => 'لا يمكن إلغاء الجهاز الحالي'
+            ];
+        }
+
+        $user->tokens()->where('id', $tokenId)->delete();
+
+        return [
+            'success' => true,
+            'message' => 'تم إلغاء الجهاز بنجاح'
+        ];
+    }
+
+    // ========== الدوال المساعدة ==========
+
+    /**
+     * ✅ تنسيق بيانات المستخدم (مع دعم المدير)
+     */
+    private function formatUser(User $user): array
+    {
+        $data = [
+            'id' => $user->id,
+            'email' => $user->email,
+            'role' => $user->role,
+            'phone' => $user->phone,
+            'is_active' => $user->is_active,
+            'full_name' => $user->full_name,
+            'email_verified' => $user->isVerified()
+        ];
+
+        // ✅ المدير
+        if ($user->isAdmin()) {
+            $data['profile'] = [
+                'type' => 'admin',
+                'access_level' => 'full_access',
+                'permissions' => ['manage_teachers', 'manage_students', 'manage_system']
+            ];
+            return $data;
+        }
+
+        // المعلم والطالب
+        $profile = $user->profile();
+
+        if ($profile) {
+            if ($user->isTeacher()) {
+                $data['profile'] = [
+                    'teacher_id' => $profile->teacher_id,
+                    'specialization' => $profile->specialization,
+                    'employment_status' => $profile->employment_status
+                ];
+            }
+            if ($user->isStudent()) {
+                $data['profile'] = [
+                    'student_id' => $profile->student_id,
+                    'grade' => $profile->grade,
+                    'section' => $profile->section,
+                    'enrollment_status' => $profile->enrollment_status,
+                    'wallet_balance' => $profile->wallet_balance
+                ];
+            }
+        }
+
+        return $data;
+    }
+
+    /**
+     * ✅ إرسال تنبيه أمني عند تغيير كلمة المرور
+     */
+    private function sendSecurityAlert(User $user): void
+    {
+        $message = "مرحباً {$user->full_name}!\n\n";
+        $message .= "🔐 تنبيه أمني: تم تغيير كلمة المرور الخاصة بحسابك.\n\n";
+        $message .= "📅 التاريخ والوقت: " . now()->format('Y-m-d H:i:s') . "\n";
+        $message .= "🌐 عنوان IP: " . request()->ip() . "\n";
+        $message .= "💻 المتصفح: " . request()->userAgent() . "\n\n";
+        $message .= "إذا لم تكن أنت من قام بهذا التغيير:\n";
+        $message .= "1. سجل الدخول فوراً وغير كلمة المرور\n";
+        $message .= "2. تواصل مع الدعم الفني فوراً\n";
+        $message .= "3. راجع نشاط حسابك\n\n";
+        $message .= "للتواصل مع الدعم: support@school.com\n\n";
+        $message .= "مع تحيات إدارة المدرسة";
+
+        Mail::raw($message, function ($mail) use ($user) {
+            $mail->to($user->email)
+                ->subject('🔐 تنبيه أمني: تم تغيير كلمة المرور');
+        });
+    }
+}
+<?php
+
+namespace App\Services;
+
+class PasswordStrengthService
+{
+    /**
+     * تحليل قوة كلمة المرور
+     */
+    public function validate(string $password): array
+    {
+        $score = 0;
+        $feedback = [];
+        $checks = [];
+
+        // 1. الطول (أهم عامل)
+        if (strlen($password) >= 8) {
+            $score += 20;
+            $checks['length_8'] = true;
+        } else {
+            $feedback[] = 'كلمة المرور قصيرة جداً (أقل من 8 أحرف)';
+            $checks['length_8'] = false;
+        }
+
+        if (strlen($password) >= 12) {
+            $score += 10;
+            $checks['length_12'] = true;
+        } else {
+            $checks['length_12'] = false;
+        }
+
+        // 2. أحرف كبيرة
+        if (preg_match('/[A-Z]/', $password)) {
+            $score += 15;
+            $checks['uppercase'] = true;
+        } else {
+            $feedback[] = 'أضف حرفاً كبيراً (A-Z)';
+            $checks['uppercase'] = false;
+        }
+
+        // 3. أحرف صغيرة
+        if (preg_match('/[a-z]/', $password)) {
+            $score += 15;
+            $checks['lowercase'] = true;
+        } else {
+            $feedback[] = 'أضف حرفاً صغيراً (a-z)';
+            $checks['lowercase'] = false;
+        }
+
+        // 4. أرقام
+        if (preg_match('/[0-9]/', $password)) {
+            $score += 20;
+            $checks['numbers'] = true;
+        } else {
+            $feedback[] = 'أضف رقماً (0-9)';
+            $checks['numbers'] = false;
+        }
+
+        // 5. رموز خاصة
+        if (preg_match('/[^a-zA-Z0-9]/', $password)) {
+            $score += 20;
+            $checks['symbols'] = true;
+        } else {
+            $feedback[] = 'أضف رمزاً خاصاً (@#$%...)';
+            $checks['symbols'] = false;
+        }
+
+        // 6. تجنب الأنماط الشائعة (مكافأة)
+        $commonPatterns = ['123', 'abc', 'password', 'qwerty', 'admin'];
+        $hasCommonPattern = false;
+        foreach ($commonPatterns as $pattern) {
+            if (stripos($password, $pattern) !== false) {
+                $hasCommonPattern = true;
+                break;
+            }
+        }
+        if (!$hasCommonPattern) {
+            $score += 5;
+            $checks['no_patterns'] = true;
+        } else {
+            $feedback[] = 'تجنب الأنماط الشائعة (123, abc...)';
+            $checks['no_patterns'] = false;
+        }
+
+        // تحديد القوة
+        $strength = match(true) {
+            $score >= 80 => 'قوية جداً 🟢',
+            $score >= 60 => 'قوية 🟡',
+            $score >= 40 => 'متوسطة 🟠',
+            default => 'ضعيفة 🔴'
+        };
+
+        return [
+            'score' => $score,
+            'max_score' => 100,
+            'strength' => $strength,
+            'feedback' => $feedback,
+            'is_valid' => $score >= 60,
+            'checks' => $checks,
+            'color' => match(true) {
+                $score >= 80 => '#4CAF50', // أخضر
+                $score >= 60 => '#FFC107', // أصفر
+                $score >= 40 => '#FF9800', // برتقالي
+                default => '#F44336'       // أحمر
+            }
+        ];
+    }
+
+    /**
+     * فحص سريع (true/false)
+     */
+    public function isStrong(string $password): bool
+    {
+        $result = $this->validate($password);
+        return $result['is_valid'];
+    }
+}
+<?php
+
+use App\Http\Controllers\AuthController;
+use App\Http\Controllers\AdminController;
+use App\Http\Controllers\BiometricAuthController; // ✅ أضيفي هذا
+use Illuminate\Support\Facades\Route;
+
+Route::prefix('v1')->group(function () {
+    
+    // Public Routes
+    Route::post('/login', [AuthController::class, 'login']);
+    Route::post('/register/student', [AuthController::class, 'registerStudent']);
+    Route::post('/register/teacher', [AuthController::class, 'registerTeacher']);
+    Route::post('/verify-account', [AuthController::class, 'verifyAccount']);
+    Route::post('/resend-verification', [AuthController::class, 'resendVerificationCode']);
+    Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+    Route::get('/password/reset/{token}', [AuthController::class, 'verifyResetToken']);
+    Route::post('/password/reset', [AuthController::class, 'resetPassword']);
+    
+    // ✅ مسارات البصمة
+    Route::prefix('biometric')->group(function () {
+        Route::post('/login-options', [BiometricAuthController::class, 'loginOptions']);
+        Route::post('/login-confirm', [BiometricAuthController::class, 'loginConfirm']);
+    });
+     
+    // Protected Routes
+    Route::middleware(['auth:sanctum', 'force.logout'])->group(function () {
+        
+        Route::get('/profile', [AuthController::class, 'profile']);
+        Route::post('/change-password', [AuthController::class, 'changePassword']);
+        Route::post('/logout', [AuthController::class, 'logout']);
+        Route::get('/active-devices', [AuthController::class, 'activeDevices']);
+        Route::delete('/devices/{tokenId}', [AuthController::class, 'revokeDevice']);
+        Route::get('/login-history', [AuthController::class, 'loginHistory']);
+        
+        // ✅ مسارات البصمة للمستخدمين المسجلين
+        Route::prefix('biometric')->group(function () {
+            Route::post('/register-options', [BiometricAuthController::class, 'registerOptions']);
+            Route::post('/register-confirm', [BiometricAuthController::class, 'registerConfirm']);
+            Route::get('/credentials', [BiometricAuthController::class, 'credentials']);
+            Route::delete('/credentials/{credentialId}', [BiometricAuthController::class, 'deleteCredential']);
+        });
+       
+        // Admin Routes
+        Route::middleware(['verified', 'role:admin'])->prefix('admin')->group(function () {
+            Route::get('/pending-registrations', [AdminController::class, 'pendingRegistrations']);
+            Route::post('/approve-user/{userId}', [AdminController::class, 'approveUser']);
+            Route::delete('/reject-user/{userId}', [AdminController::class, 'rejectUser']);
+            Route::get('/user/{userId}', [AdminController::class, 'userDetails']);
+            Route::get('/teachers', [AdminController::class, 'listTeachers']);
+            Route::get('/students', [AdminController::class, 'listStudents']);
+            Route::get('/dashboard-stats', [AdminController::class, 'dashboardStats']);
+        });
+    });
+});
+<?php
+
+use Illuminate\Foundation\Inspiring;
+use Illuminate\Support\Facades\Artisan;
+
+Artisan::command('inspire', function () {
+    $this->comment(Inspiring::quote());
+})->purpose('Display an inspiring quote');
+<?php
+
+use Illuminate\Support\Facades\Route;
+
+Route::get('/', function () {
+    return view('welcome');
+});
+<?php
+// database/migrations/0001_01_01_000000_create_users_table.php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('users', function (Blueprint $table) {
+            $table->id();
+            $table->string('email')->unique();
+            $table->string('password');
+            $table->enum('role', ['admin', 'teacher', 'student']);
+            $table->string('phone')->nullable();
+            $table->string('device_token')->nullable();
+            $table->boolean('is_active')->default(false);
+            $table->timestamp('email_verified_at')->nullable();
+            $table->timestamp('last_login_at')->nullable();
+            $table->string('last_login_ip')->nullable();
+            
+            // المفاتيح الأجنبية
+            $table->unsignedBigInteger('admin_id')->nullable();
+            $table->unsignedBigInteger('teacher_id')->nullable();
+            $table->unsignedBigInteger('student_id')->nullable();
+           
+            
+         
+            $table->string('verification_code', 6)->nullable();
+            $table->timestamp('verification_expires_at')->nullable();
+            $table->timestamp('password_changed_at')->nullable();
+            $table->integer('failed_attempts')->default(0);
+            $table->timestamp('locked_until')->nullable();
+            $table->json('active_tokens')->nullable();
+            $table->boolean('force_logout')->default(false);
+            $table->timestamp('force_logout_at')->nullable();
+        
+            
+            $table->rememberToken();
+            $table->timestamp('remember_expires_at')->nullable();
+            $table->timestamps();
+            $table->softDeletes();
+            
+            // الفهارس
+            $table->index('role');
+            $table->index('is_active');
+            $table->index('admin_id');
+            $table->index('teacher_id');
+            $table->index('student_id');
+         
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('users');
+    }
+};
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::create('cache', function (Blueprint $table) {
+            $table->string('key')->primary();
+            $table->mediumText('value');
+            $table->integer('expiration');
+        });
+
+        Schema::create('cache_locks', function (Blueprint $table) {
+            $table->string('key')->primary();
+            $table->string('owner');
+            $table->integer('expiration');
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::dropIfExists('cache');
+        Schema::dropIfExists('cache_locks');
+    }
+};
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::create('jobs', function (Blueprint $table) {
+            $table->id();
+            $table->string('queue')->index();
+            $table->longText('payload');
+            $table->unsignedTinyInteger('attempts');
+            $table->unsignedInteger('reserved_at')->nullable();
+            $table->unsignedInteger('available_at');
+            $table->unsignedInteger('created_at');
+        });
+
+        Schema::create('job_batches', function (Blueprint $table) {
+            $table->string('id')->primary();
+            $table->string('name');
+            $table->integer('total_jobs');
+            $table->integer('pending_jobs');
+            $table->integer('failed_jobs');
+            $table->longText('failed_job_ids');
+            $table->mediumText('options')->nullable();
+            $table->integer('cancelled_at')->nullable();
+            $table->integer('created_at');
+            $table->integer('finished_at')->nullable();
+        });
+
+        Schema::create('failed_jobs', function (Blueprint $table) {
+            $table->id();
+            $table->string('uuid')->unique();
+            $table->text('connection');
+            $table->text('queue');
+            $table->longText('payload');
+            $table->longText('exception');
+            $table->timestamp('failed_at')->useCurrent();
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::dropIfExists('jobs');
+        Schema::dropIfExists('job_batches');
+        Schema::dropIfExists('failed_jobs');
+    }
+};
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        $teams = config('permission.teams');
+        $tableNames = config('permission.table_names');
+        $columnNames = config('permission.column_names');
+        $pivotRole = $columnNames['role_pivot_key'] ?? 'role_id';
+        $pivotPermission = $columnNames['permission_pivot_key'] ?? 'permission_id';
+
+        throw_if(empty($tableNames), Exception::class, 'Error: config/permission.php not loaded. Run [php artisan config:clear] and try again.');
+        throw_if($teams && empty($columnNames['team_foreign_key'] ?? null), Exception::class, 'Error: team_foreign_key on config/permission.php not loaded. Run [php artisan config:clear] and try again.');
+
+        Schema::create($tableNames['permissions'], static function (Blueprint $table) {
+            // $table->engine('InnoDB');
+            $table->bigIncrements('id'); // permission id
+            $table->string('name');       // For MyISAM use string('name', 225); // (or 166 for InnoDB with Redundant/Compact row format)
+            $table->string('guard_name'); // For MyISAM use string('guard_name', 25);
+            $table->timestamps();
+
+            $table->unique(['name', 'guard_name']);
+        });
+
+        Schema::create($tableNames['roles'], static function (Blueprint $table) use ($teams, $columnNames) {
+            // $table->engine('InnoDB');
+            $table->bigIncrements('id'); // role id
+            if ($teams || config('permission.testing')) { // permission.testing is a fix for sqlite testing
+                $table->unsignedBigInteger($columnNames['team_foreign_key'])->nullable();
+                $table->index($columnNames['team_foreign_key'], 'roles_team_foreign_key_index');
+            }
+            $table->string('name');       // For MyISAM use string('name', 225); // (or 166 for InnoDB with Redundant/Compact row format)
+            $table->string('guard_name'); // For MyISAM use string('guard_name', 25);
+            $table->timestamps();
+            if ($teams || config('permission.testing')) {
+                $table->unique([$columnNames['team_foreign_key'], 'name', 'guard_name']);
+            } else {
+                $table->unique(['name', 'guard_name']);
+            }
+        });
+
+        Schema::create($tableNames['model_has_permissions'], static function (Blueprint $table) use ($tableNames, $columnNames, $pivotPermission, $teams) {
+            $table->unsignedBigInteger($pivotPermission);
+
+            $table->string('model_type');
+            $table->unsignedBigInteger($columnNames['model_morph_key']);
+            $table->index([$columnNames['model_morph_key'], 'model_type'], 'model_has_permissions_model_id_model_type_index');
+
+            $table->foreign($pivotPermission)
+                ->references('id') // permission id
+                ->on($tableNames['permissions'])
+                ->onDelete('cascade');
+            if ($teams) {
+                $table->unsignedBigInteger($columnNames['team_foreign_key']);
+                $table->index($columnNames['team_foreign_key'], 'model_has_permissions_team_foreign_key_index');
+
+                $table->primary([$columnNames['team_foreign_key'], $pivotPermission, $columnNames['model_morph_key'], 'model_type'],
+                    'model_has_permissions_permission_model_type_primary');
+            } else {
+                $table->primary([$pivotPermission, $columnNames['model_morph_key'], 'model_type'],
+                    'model_has_permissions_permission_model_type_primary');
+            }
+
+        });
+
+        Schema::create($tableNames['model_has_roles'], static function (Blueprint $table) use ($tableNames, $columnNames, $pivotRole, $teams) {
+            $table->unsignedBigInteger($pivotRole);
+
+            $table->string('model_type');
+            $table->unsignedBigInteger($columnNames['model_morph_key']);
+            $table->index([$columnNames['model_morph_key'], 'model_type'], 'model_has_roles_model_id_model_type_index');
+
+            $table->foreign($pivotRole)
+                ->references('id') // role id
+                ->on($tableNames['roles'])
+                ->onDelete('cascade');
+            if ($teams) {
+                $table->unsignedBigInteger($columnNames['team_foreign_key']);
+                $table->index($columnNames['team_foreign_key'], 'model_has_roles_team_foreign_key_index');
+
+                $table->primary([$columnNames['team_foreign_key'], $pivotRole, $columnNames['model_morph_key'], 'model_type'],
+                    'model_has_roles_role_model_type_primary');
+            } else {
+                $table->primary([$pivotRole, $columnNames['model_morph_key'], 'model_type'],
+                    'model_has_roles_role_model_type_primary');
+            }
+        });
+
+        Schema::create($tableNames['role_has_permissions'], static function (Blueprint $table) use ($tableNames, $pivotRole, $pivotPermission) {
+            $table->unsignedBigInteger($pivotPermission);
+            $table->unsignedBigInteger($pivotRole);
+
+            $table->foreign($pivotPermission)
+                ->references('id') // permission id
+                ->on($tableNames['permissions'])
+                ->onDelete('cascade');
+
+            $table->foreign($pivotRole)
+                ->references('id') // role id
+                ->on($tableNames['roles'])
+                ->onDelete('cascade');
+
+            $table->primary([$pivotPermission, $pivotRole], 'role_has_permissions_permission_id_role_id_primary');
+        });
+
+        app('cache')
+            ->store(config('permission.cache.store') != 'default' ? config('permission.cache.store') : null)
+            ->forget(config('permission.cache.key'));
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        $tableNames = config('permission.table_names');
+
+        throw_if(empty($tableNames), Exception::class, 'Error: config/permission.php not found and defaults could not be merged. Please publish the package configuration before proceeding, or drop the tables manually.');
+
+        Schema::drop($tableNames['role_has_permissions']);
+        Schema::drop($tableNames['model_has_roles']);
+        Schema::drop($tableNames['model_has_permissions']);
+        Schema::drop($tableNames['roles']);
+        Schema::drop($tableNames['permissions']);
+    }
+};
+<?php
+// database/migrations/0001_01_01_000001_create_teachers_table.php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('teachers', function (Blueprint $table) {
+            $table->id();
+            $table->string('first_name');
+            $table->string('middle_name')->nullable();
+            $table->string('last_name');
+            $table->string('teacher_id')->unique();
+            $table->string('national_id')->unique();
+            $table->date('birth_date');
+            $table->enum('gender', ['male', 'female']);
+            $table->text('address');
+            $table->text('health_status')->nullable();
+            $table->string('specialization');
+            $table->enum('education_level', ['primary', 'middle', 'high']);
+            $table->string('high_school_branch')->nullable();
+            $table->boolean('is_class_teacher')->default(false);
+            $table->integer('years_of_experience')->default(0);
+            $table->integer('weekly_hours')->default(40);
+            $table->date('hire_date');
+            $table->string('cv_path')->nullable();
+            $table->string('legal_document_path')->nullable();
+            $table->enum('employment_status', ['pending', 'active', 'on_leave', 'terminated'])->default('pending');
+            $table->decimal('rating', 3, 2)->default(0.00);
+            $table->timestamps();
+            $table->softDeletes();
+            
+            $table->index(['education_level', 'specialization']);
+            $table->index('employment_status');
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('teachers');
+    }
+};
+<?php
+// database/migrations/0001_01_01_000002_create_students_table.php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('students', function (Blueprint $table) {
+            $table->id();
+            $table->string('first_name');
+            $table->string('father_name');
+            $table->string('mother_name');
+            $table->string('last_name');
+            $table->string('student_id')->unique();
+            $table->date('birth_date');
+            $table->enum('gender', ['male', 'female']);
+            $table->enum('education_level', ['primary', 'middle', 'high']);
+            $table->integer('grade');
+            $table->string('section')->nullable();
+            $table->text('address');
+            $table->string('guardian_phone');
+            $table->string('guardian_email')->nullable();
+            $table->enum('guardian_relation', ['father', 'mother', 'other'])->nullable();
+            $table->text('health_status')->nullable();
+            $table->string('legal_document_path')->nullable();
+            $table->unsignedBigInteger('bus_id')->nullable();
+            $table->enum('enrollment_status', ['pending', 'active', 'graduated', 'transferred'])->default('pending');
+            $table->date('enrollment_date');
+            $table->decimal('wallet_balance', 10, 2)->default(0.00);
+            $table->timestamps();
+            $table->softDeletes();
+            
+            $table->index(['education_level', 'grade', 'section']);
+            $table->index('enrollment_status');
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('students');
+    }
+};
+<?php
+// database/migrations/0001_01_01_000004_create_password_resets_table.php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('password_resets', function (Blueprint $table) {
+            $table->id();
+            $table->string('email')->index();
+            $table->string('token', 64)->index();
+            $table->string('code', 6);
+            $table->boolean('used')->default(false);
+            $table->timestamp('expires_at');
+            $table->timestamps();
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('password_resets');
+    }
+};
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::create('personal_access_tokens', function (Blueprint $table) {
+            $table->id();
+            $table->morphs('tokenable');
+            $table->text('name');
+            $table->string('token', 64)->unique();
+            $table->text('abilities')->nullable();
+            $table->timestamp('last_used_at')->nullable();
+            $table->timestamp('expires_at')->nullable()->index();
+            $table->timestamps();
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::dropIfExists('personal_access_tokens');
+    }
+};
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('webauthn_credentials', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('user_id')->constrained()->cascadeOnDelete();
+            $table->string('credential_id', 255);
+            $table->json('public_key');
+            $table->string('type', 255);
+            $table->json('transports')->nullable();
+            $table->string('name')->nullable();
+            $table->timestamp('last_used_at')->nullable();
+            $table->timestamps();
+            
+            $table->unique('credential_id');
+            $table->index('user_id');
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('webauthn_credentials');
+    }
+};
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('login_history', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('user_id')->constrained()->cascadeOnDelete();
+            $table->string('ip_address', 45)->nullable();
+            $table->text('user_agent')->nullable();
+            $table->string('device_type')->nullable();
+            $table->string('status'); // success, failed, locked
+            $table->string('location')->nullable();
+            $table->timestamps();
+            
+            $table->index('user_id');
+            $table->index('status');
+            $table->index('created_at');
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('login_history');
+    }
+};
+<?php
+
+use App\Http\Middleware\CheckActive;
+use App\Http\Middleware\CheckForceLogout;
+use App\Http\Middleware\CheckRole;
+use App\Http\Middleware\CheckVerified;
+use Illuminate\Foundation\Application;
+use Illuminate\Foundation\Configuration\Exceptions;
+use Illuminate\Foundation\Configuration\Middleware;
+
+
+
+return Application::configure(basePath: dirname(__DIR__))
+     ->withRouting(
+        web: __DIR__.'/../routes/web.php',
+        api: __DIR__.'/../routes/api.php',
+        commands: __DIR__.'/../routes/console.php',
+        health: '/up',
+    )
+    ->withMiddleware(function (Middleware $middleware) {
+        $middleware->alias([
+            'role'=>CheckRole::class,
+            'active'=>CheckActive::class,
+            'force.logout'=>CheckForceLogout::class,
+            'verified'=>CheckVerified::class]);
+        $middleware->api([
+        \Illuminate\Session\Middleware\StartSession::class,
+        \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
+    ]);    
+    })
+    ->withExceptions(function (Exceptions $exceptions) {
+        //
+    })->create();
+    
+
+   

@@ -10,7 +10,7 @@ return new class extends Migration
     {
         Schema::create('webauthn_credentials', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('user_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('user_id')->constrained('users')->cascadeOnDelete();
             $table->string('credential_id', 255);
             $table->json('public_key');
             $table->string('type', 255);
@@ -18,9 +18,9 @@ return new class extends Migration
             $table->string('name')->nullable();
             $table->timestamp('last_used_at')->nullable();
             $table->timestamps();
-            
+
             $table->unique('credential_id');
-            $table->index('user_id');
+
         });
     }
 

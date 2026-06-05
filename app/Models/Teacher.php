@@ -10,18 +10,14 @@ class Teacher extends Model
     use HasFactory, SoftDeletes;
 
     protected $fillable = [
-        'first_name', 'middle_name', 'last_name', 'teacher_id', 'national_id',
-        'birth_date', 'gender', 'address', 'health_status', 'specialization',
-        'education_level', 'high_school_branch', 'is_class_teacher',
-        'years_of_experience', 'weekly_hours', 'hire_date',
-        'cv_path', 'legal_document_path', 'status', 'rating'
+        'teacher_name',
+        'birth_date', 'gender',  'specialization',
+        'education_level',
+        'cv', 'legal_document_path', 'status'
     ];
 
     protected $casts = [
-        'birth_date' => 'date',
-        'hire_date' => 'date',
-        'is_class_teacher' => 'boolean',
-        'rating' => 'decimal:2',
+        'birth_date' => 'date'
     ];
 
     public function user()
@@ -29,8 +25,4 @@ class Teacher extends Model
         return $this->hasOne(User::class, 'teacher_id');
     }
 
-    public function getFullNameAttribute(): string
-    {
-        return $this->first_name . ' ' . $this->last_name;
-    }
 }

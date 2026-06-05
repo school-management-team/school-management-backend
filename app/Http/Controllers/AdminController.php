@@ -27,19 +27,16 @@ class AdminController extends Controller
                 return [
                     'user_id' => $user->id,
                     'email' => $user->email,
-                    'full_name' => $user->full_name,
                     'phone' => $user->phone,
                     'registered_at' => $user->created_at->format('Y-m-d H:i'),
                     'student_details' => [
                         'student_id' => $user->student->student_id ?? null,
+                        'full_name'=>$user->student->student_name,
                         'grade' => $user->student->grade ?? null,
                         'education_level' => $user->student->education_level ?? null,
                         'birth_date' => $user->student->birth_date?->format('Y-m-d'),
                         'father_name' => $user->student->father_name ?? null,
-                        'mother_name' => $user->student->mother_name ?? null,
-                        'guardian_phone' => $user->student->guardian_phone ?? null,
-                        'address' => $user->student->address ?? null,
-                        'health_status' => $user->student->health_status ?? null,
+                        'mother_name' => $user->student->mother_name ?? null
                     ]
                 ];
             });
@@ -54,17 +51,14 @@ class AdminController extends Controller
                 return [
                     'user_id' => $user->id,
                     'email' => $user->email,
-                    'full_name' => $user->full_name,
                     'phone' => $user->phone,
                     'registered_at' => $user->created_at->format('Y-m-d H:i'),
                     'teacher_details' => [
                         'teacher_id' => $user->teacher->teacher_id ?? null,
+                        'full_name'=>$user->teacher->teacher_name,
                         'specialization' => $user->teacher->specialization ?? null,
                         'education_level' => $user->teacher->education_level ?? null,
-                        'years_of_experience' => $user->teacher->years_of_experience ?? null,
-                        'national_id' => $user->teacher->national_id ?? null,
-                        'address' => $user->teacher->address ?? null,
-                        'health_status' => $user->teacher->health_status ?? null,
+                        'grade'=>$user->teacher->grade ?? null
                     ]
                 ];
             });
@@ -95,7 +89,7 @@ class AdminController extends Controller
     elseif (!$user->isVerified()) {
         return response()->json([
             'success' => false,
-            'message' => 'لا يمكن الموافقة على المستخدم قبل تفعيل بريده الإلكتروني'
+            'message' => 'لا يمكن الموافقة على المستخدم قبل تفعيل حسابه'
         ], 400);
     }
 
@@ -107,6 +101,21 @@ class AdminController extends Controller
         ], 400);
     }
 
+    if ($user->isStudent() && $user->student) {
+        $student = $user->student;
+        $grade = $student->grade; // الصف الدراسي (1, 2, 3, ...)
+
+        // ✅ إنشاء رقم مدرسي حسب الصف
+        try {
+            $studentNumber = Student::getNextStudentNumberForGrade($grade);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], 400);
+        }
+    }
+
     // تفعيل المستخدم
     $user->update(['is_active' => true]);
 
@@ -114,7 +123,7 @@ class AdminController extends Controller
     if ($user->isTeacher() && $user->teacher) {
         $user->teacher->update(['status' => 'active']);
     } elseif ($user->isStudent() && $user->student) {
-        $user->student->update(['status' => 'active']);
+        $user->student->update(['status' => 'active', 'student_number' => $studentNumber]);
     }
 
     // إرسال إيميل تفعيل
@@ -154,13 +163,18 @@ class AdminController extends Controller
 
         // حفظ البريد والاسم قبل الحذف
         $email = $user->email;
-        $name = $user->full_name;
+        $name = '';
 
         // حذف الملف الشخصي
         if ($user->teacher) {
+            $name=$user->teacher->teacher_name;
             $user->teacher->delete();
         } elseif ($user->student) {
+            $name=$user->student->student_name;
             $user->student->delete();
+        }elseif($user->guardian){
+            $name=$user->guardian->guardian_name;
+            $user->guardian->delete();
         }
 
         // حذف المستخدم
@@ -179,74 +193,96 @@ class AdminController extends Controller
     // عرض تفاصيل مستخدم
     public function userDetails($userId)
     {
-        $user = User::with(['teacher', 'student'])
-            ->findOrFail($userId);
 
-            if(!$user)
-            {
-                return response()->json([
-                'success' => false,
-                'message' => 'لم يتم العثور على المستخدم'
-                ]);
-            }
+    $user = User::with(['teacher', 'student', 'student.guardians'])
+        ->findOrFail($userId);
 
-            $details = [
-            'user_id' => $user->id,
-            'email' => $user->email,
-            'role' => $user->role,
-            'full_name' => $user->full_name,
-            'phone' => $user->phone,
-            'is_active' => $user->is_active,
-            'registered_at' => $user->created_at->format('Y-m-d H:i'),
-            'last_login_at' => $user->last_login_at?->format('Y-m-d H:i'),
-            ];
+    if (!$user) {
+        return response()->json([
+            'success' => false,
+            'message' => 'لم يتم العثور على المستخدم'
+        ], 404);
+    }
 
-            if ($user->isAdmin()) {
-                $details['admin_details'] = [
-                'type' => 'مدير النظام',
-                'access_level' => 'كامل',
-                'can_manage' => ['teachers', 'students', 'system']
-                ];
-                return response()->json([
-                'success' => true,
-                'data' => $details
-                ]);
-            }
+    $details = [
+        'user_id' => $user->id,
+        'email' => $user->email,
+        'role' => $user->role,
+        'phone' => $user->phone,
+        'is_active' => $user->is_active,
+        'registered_at' => $user->created_at->format('Y-m-d H:i'),
+        'last_login_at' => $user->last_login_at?->format('Y-m-d H:i'),
+    ];
 
-            if ($user->isTeacher() && $user->teacher) {
-                $details['teacher_details'] = [
-                'teacher_id' => $user->teacher->teacher_id,
-                'specialization' => $user->teacher->specialization,
-                'education_level' => $user->teacher->education_level,
-                'years_of_experience' => $user->teacher->years_of_experience,
-                'status' => $user->teacher->status,
-                'national_id' => $user->teacher->national_id,
-                'address' => $user->teacher->address,
-                'health_status' => $user->teacher->health_status,
-                ];
-            } elseif ($user->isStudent() && $user->student) {
-                $details['student_details'] = [
-                'student_id' => $user->student->student_id,
-                'grade' => $user->student->grade,
-                'section' => $user->student->section,
-                'education_level' => $user->student->education_level,
-                'status' => $user->student->status,
-                'father_name' => $user->student->father_name,
-                'mother_name' => $user->student->mother_name,
-                'guardian_phone' => $user->student->guardian_phone,
-                'guardian_email' => $user->student->guardian_email,
-                'address' => $user->student->address,
-                'health_status' => $user->student->health_status,
-                'wallet_balance' => $user->student->wallet_balance,
-                ];
-            }
-
+    if ($user->isAdmin()) {
+        $details['admin_details'] = [
+            'type' => 'مدير النظام',
+            'access_level' => 'كامل',
+            'can_manage' => ['teachers', 'students', 'system']
+        ];
         return response()->json([
             'success' => true,
             'data' => $details
         ]);
     }
 
+    if ($user->isTeacher() && $user->teacher) {
+        $details['teacher_details'] = [
+            'teacher_id' => $user->teacher->id,
+            'full_name' => $user->teacher->teacher_name,
+            'specialization' => $user->teacher->specialization,
+            'education_level' => $user->teacher->education_level,
+            'status' => $user->teacher->status,
+        ];
+    } elseif ($user->isStudent() && $user->student) {
+        $details['student_details'] = [
+            'student_id' => $user->student->id,
+            'full_name' => $user->student->student_name,
+            'grade' => $user->student->grade,
+            'education_level' => $user->student->education_level,
+            'status' => $user->student->status,
+            'father_name' => $user->student->father_name,
+            'mother_name' => $user->student->mother_name,
+            'birth_date' => $user->student->birth_date ,
+            'gender' => $user->student->gender,
+            'enrollment_date' => $user->student->enrollment_date,
+        ];
+
+        //  إضافة أولياء الأمور للطالب
+        if ($user->student->guardians()->exists()) {
+            $details['student_details']['guardians'] = $user->student->guardians->map(function ($guardian) {
+                return [
+                    'guardian_id' => $guardian->id,
+                    'guardian_name' => $guardian->guardian_name,
+                    'relationship' => $guardian->pivot->relationship ?? 'غير محدد',
+                    'is_primary' => (bool)($guardian->pivot->is_primary ?? false),
+                    'status' => $guardian->status,
+                    'number_of_children' => $guardian->number_of_children,
+                ];
+            });
+
+            //  إضافة ولي الأمر الأساسي كحقل منفصل
+            $primaryGuardian = $user->student->guardians()
+                ->wherePivot('is_primary', true)
+                ->first();
+
+            if ($primaryGuardian) {
+                $details['student_details']['primary_guardian'] = [
+                    'guardian_id' => $primaryGuardian->id,
+                    'guardian_name' => $primaryGuardian->guardian_name,
+                    'relationship' => $primaryGuardian->pivot->relationship,
+                ];
+            }
+        } else {
+            $details['student_details']['guardians'] = []; // لا يوجد أولياء أمر
+        }
+    }
+
+    return response()->json([
+        'success' => true,
+        'data' => $details
+    ]);
+}
 
     // إحصائيات سريعة للمدير
     public function dashboardStats()
@@ -279,6 +315,12 @@ class AdminController extends Controller
 
         $message = "مرحباً {$user->full_name}!\n\n";
         $message .= "🎉 تمت الموافقة على طلب تسجيلك {$roleArabic} في نظام إدارة المدرسة.\n\n";
+
+        if ($user->isStudent() ) {
+        $message .= "📚 رقمك المدرسي هو: **{$user->student->studentNumber}**\n";
+        $message .= "يمكنك استخدام هذا الرقم للتعريف بنفسك داخل المدرسة.\n\n";
+        }
+
         $message .= "✅ بريدك الإلكتروني مفعل.\n";
         $message .= "✅ تمت الموافقة على طلبك من قبل الإدارة.\n\n";
         $message .= "يمكنك الآن تسجيل الدخول إلى حسابك والبدء في استخدام النظام.\n\n";

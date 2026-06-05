@@ -9,106 +9,97 @@ use Illuminate\Support\Facades\Route;
 // API Routes - نظام إدارة المدرسة
 
 Route::prefix('v1')->group(function () {
-    
 
-    
+
+
     // تسجيل الدخول
     Route::post('/login', [AuthController::class, 'login']);
-    
+
     // تسجيل طالب جديد
     Route::post('/register/student', [AuthController::class, 'registerStudent']);
-    
+
     // تسجيل معلم جديد
     Route::post('/register/teacher', [AuthController::class, 'registerTeacher']);
-    
+
     // تفعيل البريد الإلكتروني
     Route::post('/verify-account', [AuthController::class, 'verifyAccount']);
-    
+
     // إعادة إرسال كود التفعيل
     Route::post('/resend-verification', [AuthController::class, 'resendVerificationCode'])->middleware('throttle:3,10');
-    
+
     // نسيت كلمة المرور
     Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
-    
-    // التحقق من رمز إعادة التعيين
-    Route::get('/password/reset/{token}', [AuthController::class, 'verifyResetToken']);
-    
+
+
     // إعادة تعيين كلمة المرور
     Route::post('/password/reset', [AuthController::class, 'resetPassword']);
-    
+
     // فحص قوة كلمة المرور
     Route::post('/check-password-strength', [AuthController::class, 'checkPasswordStrength']);
-    
-  
+
+
     Route::prefix('biometric')->group(function () {
         // طلب الدخول بالبصمة
         Route::post('/login-options', [BiometricAuthController::class, 'loginOptions']);
-        
+
         // تأكيد الدخول بالبصمة
         Route::post('/login-confirm', [BiometricAuthController::class, 'loginConfirm']);
     });
-     
 
-    Route::middleware(['auth:sanctum', 'force.logout'])->group(function () {
-        
+
+    Route::middleware(['auth:sanctum'])->group(function () {
+
         // الملف الشخصي
         Route::get('/profile', [AuthController::class, 'profile']);
-        
+
         // تغيير كلمة المرور
         Route::post('/change-password', [AuthController::class, 'changePassword']);
-        
+
         // تسجيل الخروج
         Route::post('/logout', [AuthController::class, 'logout']);
-        
-        // الأجهزة النشطة
-        Route::get('/active-devices', [AuthController::class, 'activeDevices']);
-        
-        // إلغاء جهاز محدد
-        Route::delete('/devices/{tokenId}', [AuthController::class, 'revokeDevice']);
-        
-        // سجل محاولات الدخول
-        Route::get('/login-history', [AuthController::class, 'loginHistory']);
-        
-       
+
+
+
         Route::prefix('biometric')->group(function () {
             // طلب تسجيل بصمة جديدة
             Route::post('/register-options', [BiometricAuthController::class, 'registerOptions']);
-            
+
             // تأكيد تسجيل البصمة
             Route::post('/register-confirm', [BiometricAuthController::class, 'registerConfirm']);
-            
+
             // عرض البصمات المسجلة
             Route::get('/credentials', [BiometricAuthController::class, 'credentials']);
-            
+
             // حذف بصمة
             Route::delete('/credentials/{credentialId}', [BiometricAuthController::class, 'deleteCredential']);
         });
-       
-     
-        // مسارات المدير 
-        
+
+
+        // مسارات المدير
+
         Route::middleware(['verified', 'role:admin'])->prefix('admin')->group(function () {
             // عرض الطلبات المعلقة
             Route::get('/pending-registrations', [AdminController::class, 'pendingRegistrations']);
-            
+
             // الموافقة على مستخدم
             Route::post('/approve-user/{userId}', [AdminController::class, 'approveUser']);
-            
+
             // رفض مستخدم
             Route::delete('/reject-user/{userId}', [AdminController::class, 'rejectUser']);
-            
+
             // عرض تفاصيل مستخدم
             Route::get('/user/{userId}', [AdminController::class, 'userDetails']);
-            
+
             // قائمة المعلمين
             Route::get('/teachers', [AdminController::class, 'listTeachers']);
-            
+
             // قائمة الطلاب
             Route::get('/students', [AdminController::class, 'listStudents']);
-            
+
             // إحصائيات لوحة التحكم
             Route::get('/dashboard-stats', [AdminController::class, 'dashboardStats']);
         });
+
     });
 });
 
