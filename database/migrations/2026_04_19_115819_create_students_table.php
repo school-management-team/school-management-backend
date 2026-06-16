@@ -10,6 +10,7 @@ return new class extends Migration
     {
         Schema::create('students', function (Blueprint $table) {
             $table->id();
+            $table->string('student_number', 5)->nullable()->unique();
             $table->string('student_name');
             $table->string('father_name');
             $table->string('mother_name');
@@ -18,7 +19,7 @@ return new class extends Migration
             $table->enum('education_level', ['primary', 'middle', 'high']);
             $table->string('grade');
 
-            $table->enum('status', ['unverified', 'pending', 'cancelled', 'active', 'graduated', 'transferred'])->default('unverified');
+            $table->enum('status', ['unverified', 'pending', 'rejected', 'active', 'graduated', 'transferred'])->default('unverified');
             $table->date('enrollment_date');
 
             $table->timestamps();

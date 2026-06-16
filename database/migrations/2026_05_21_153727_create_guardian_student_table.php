@@ -15,6 +15,7 @@ return new class extends Migration
             $table->foreignId('student_id')->constrained()->cascadeOnDelete();
             $table->boolean('is_primary');
 
+            $table->timestamps();
 
             $table->unique(['guardian_id', 'student_id']);
 

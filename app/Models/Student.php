@@ -8,9 +8,10 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Student extends Model
 {
-    use HasFactory, SoftDeletes;
+    use HasFactory , SoftDeletes;
 
     protected $fillable = [
+        'student_number',
         'student_name', 'father_name', 'mother_name',
         'birth_date', 'gender', 'education_level', 'grade',
         'status', 'enrollment_date'

@@ -168,17 +168,18 @@ class AdminController extends Controller
         // حذف الملف الشخصي
         if ($user->teacher) {
             $name=$user->teacher->teacher_name;
-            $user->teacher->delete();
+            $user->teacher->update(['status'=>'rejected']);
+            $user->update(['is_active'=>false]);
         } elseif ($user->student) {
             $name=$user->student->student_name;
-            $user->student->delete();
+            $user->student->update(['status'=>'rejected']);
+            $user->update(['is_active'=>false]);
         }elseif($user->guardian){
             $name=$user->guardian->guardian_name;
-            $user->guardian->delete();
+            $user->guardian->update(['status'=>'rejected']);
+            $user->update(['is_active'=>false]);
         }
 
-        // حذف المستخدم
-        $user->delete();
 
         // إرسال إيميل رفض
         $this->sendRejectionEmail($email, $name, $reason);

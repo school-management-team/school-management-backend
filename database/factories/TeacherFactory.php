@@ -1,5 +1,4 @@
 <?php
-// database/factories/TeacherFactory.php
 
 namespace Database\Factories;
 
@@ -12,48 +11,54 @@ class TeacherFactory extends Factory
 
     public function definition(): array
     {
-        $educationLevel = fake()->randomElement(['primary', 'middle', 'high']);
-
         return [
-            'first_name' => fake()->firstName(),
-            'middle_name' => fake()->optional()->firstName(),
-            'last_name' => fake()->lastName(),
-            'teacher_id' => 'TCH' . date('Y') . fake()->unique()->numberBetween(1000, 9999),
-            'national_id' => fake()->unique()->numerify('###########'),
-            'birth_date' => fake()->dateTimeBetween('-60 years', '-22 years'),
-            'gender' => fake()->randomElement(['male', 'female']),
-            'address' => fake()->address(),
-            'health_status' => fake()->optional()->sentence(),
-            'specialization' => fake()->randomElement([
-                'رياضيات', 'فيزياء', 'كيمياء', 'علوم', 'لغة عربية',
-                'لغة إنجليزية', 'لغة فرنسية', 'تاريخ', 'جغرافيا', 'فلسفة',
-                'تربية إسلامية', 'تربية فنية', 'تربية رياضية', 'معلوماتية'
+            'teacher_name' => fake()->name(),
+
+            'birth_date' => fake()->dateTimeBetween(
+                '-60 years',
+                '-22 years'
+            ),
+
+            'gender' => fake()->randomElement([
+                'male',
+                'female'
             ]),
-            'education_level' => $educationLevel,
-            'high_school_branch' => $educationLevel === 'high'
-                ? fake()->randomElement(['scientific', 'literary'])
-                : null,
-            'is_class_teacher' => fake()->boolean(20),
-            'years_of_experience' => fake()->numberBetween(0, 35),
-            'weekly_hours' => fake()->numberBetween(20, 40),
-            'hire_date' => fake()->dateTimeBetween('-10 years', 'now'),
-            'cv_path' => null,
-            'legal_document_path' => null,
-            'status' => fake()->randomElement(['unverified','pending', 'active', 'active', 'active']), // 75% active
-            'rating' => fake()->randomFloat(2, 2, 5),
+
+            'grade' => (string) fake()->numberBetween(1, 12),
+
+            'education_level' => fake()->randomElement([
+                'primary',
+                'middle',
+                'high'
+            ]),
+
+            'specialization' => fake()->randomElement([
+                'رياضيات',
+                'علوم',
+                'فيزياء',
+                'كيمياء',
+                'لغة عربية',
+                'لغة إنجليزية'
+            ]),
+
+            'cv' => 'cv.pdf',
+
+            'legal_document_path' => 'document.pdf',
+
+            'status' => 'unverified',
         ];
     }
 
     public function active(): static
     {
-        return $this->state(fn (array $attributes) => [
+        return $this->state(fn () => [
             'status' => 'active',
         ]);
     }
 
     public function pending(): static
     {
-        return $this->state(fn (array $attributes) => [
+        return $this->state(fn () => [
             'status' => 'pending',
         ]);
     }

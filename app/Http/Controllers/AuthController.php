@@ -8,7 +8,6 @@ use App\Models\Teacher;
 use App\Models\Student;
 use App\Models\Guardian;
 use App\Services\AuthService;
-use App\Services\PasswordStrengthService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
@@ -242,7 +241,7 @@ class AuthController extends Controller
             'login' => 'required|string|unique:users,email|unique:users,phone',
             'guardian_name' => 'required|string|max:50',
             'relationship' => 'required|in:father,mother',
-            'number_of_children' => 'required|integer',
+            'number_of_children' => 'required|integer|min:0|max:20',
             'password' => 'required|string|min:8|confirmed',
 
         ]);

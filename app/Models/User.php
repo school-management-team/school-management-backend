@@ -15,7 +15,7 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
 {
     use  HasApiTokens;
     use HasFactory, Notifiable, SoftDeletes;
-     use WebAuthnAuthentication;
+    use WebAuthnAuthentication;
 
     protected $fillable = [
        'email',
@@ -25,9 +25,6 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
         'is_active',
         'email_verified_at',
         'last_login_at',
-        'last_login_ip',
-        'admin_id',
-        'supervisor_id',
         'teacher_id',
         'student_id',
         'guardian_id',
@@ -94,7 +91,6 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
 
     public function profile()
     {
-    if ($this->isAdmin()) return $this->admin;
     if ($this->isTeacher()) return $this->teacher;
     if ($this->isStudent()) return $this->student;
     if ($this->isGuardian()) return $this->guardian;
@@ -141,7 +137,7 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
 
     public function getLockRemainingMinutes(): int
     {
-        return $this->locked_until?->diffInMinutes(now()) ?? 0;
+        return max(0,now()->diffInMinutes($this->locked_until,false));
     }
 
     public function getRemainingAttempts(): int
@@ -225,6 +221,44 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
     public function scopeLocked($query)
     {
         return $query->where('locked_until', '>', now());
+    }
+
+
+
+    //  الحصول على الرقم المدرسي
+    public static function getNextStudentNumberForGrade(string $grade): string
+    {
+        // تحديد نطاق الأرقام حسب الصف
+        $ranges = config('school.student_number_ranges');
+
+        if (!isset($ranges[$grade])) {
+            throw new \Exception("الصف {$grade} غير معرف في نظام الترقيم");
+        }
+
+        $start = $ranges[$grade]['start'];
+        $end = $ranges[$grade]['end'];
+
+       // البحث عن آخر رقم مستخدم في هذا الصف
+        $lastStudent = Student::where('grade', $grade)
+        ->whereNotNull('student_number')
+        ->orderBy('student_number', 'desc')
+        ->first();
+
+        if ($lastStudent && $lastStudent->student_number) {
+            // استخراج الرقم من الـ student_number
+            $lastNumber = (int) $lastStudent->student_number;
+            $newNumber = $lastNumber + 1;
+
+            // التأكد من عدم تجاوز النطاق المسموح
+            if ($newNumber > $end) {
+            throw new \Exception("لقد تجاوزت الأرقام المتاحة للصف {$grade} الحد المسموح");
+            }
+
+            return (string) $newNumber;
+        }
+
+        // أول طالب في هذا الصف
+        return (string) $start;
     }
 
 }

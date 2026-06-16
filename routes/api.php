@@ -5,49 +5,61 @@ use App\Http\Controllers\AdminController;
 use App\Http\Controllers\BiometricAuthController;
 use Illuminate\Support\Facades\Route;
 
-
-// API Routes - نظام إدارة المدرسة
-
 Route::prefix('v1')->group(function () {
 
 
+    // Public Routes
 
     // تسجيل الدخول
-    Route::post('/login', [AuthController::class, 'login']);
+    Route::post('/login', [AuthController::class, 'login'])
+        ->middleware('throttle:5,1');
 
     // تسجيل طالب جديد
-    Route::post('/register/student', [AuthController::class, 'registerStudent']);
+    Route::post('/register/student', [AuthController::class, 'registerStudent'])
+        ->middleware('throttle:3,10');
 
     // تسجيل معلم جديد
-    Route::post('/register/teacher', [AuthController::class, 'registerTeacher']);
+    Route::post('/register/teacher', [AuthController::class, 'registerTeacher'])
+        ->middleware('throttle:3,10');
 
-    // تفعيل البريد الإلكتروني
-    Route::post('/verify-account', [AuthController::class, 'verifyAccount']);
+    // تفعيل الحساب
+    Route::post('/verify-account', [AuthController::class, 'verifyAccount'])
+        ->middleware('throttle:10,1');
 
     // إعادة إرسال كود التفعيل
-    Route::post('/resend-verification', [AuthController::class, 'resendVerificationCode'])->middleware('throttle:3,10');
+    Route::post('/resend-verification', [AuthController::class, 'resendVerificationCode'])
+        ->middleware('throttle:3,10');
 
     // نسيت كلمة المرور
-    Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
-
+    Route::post('/forgot-password', [AuthController::class, 'forgotPassword'])
+        ->middleware('throttle:3,10');
 
     // إعادة تعيين كلمة المرور
-    Route::post('/password/reset', [AuthController::class, 'resetPassword']);
+    Route::post('/password/reset', [AuthController::class, 'resetPassword'])
+        ->middleware('throttle:5,10');
 
-    // فحص قوة كلمة المرور
-    Route::post('/check-password-strength', [AuthController::class, 'checkPasswordStrength']);
 
+    // Biometric Login
 
     Route::prefix('biometric')->group(function () {
+
         // طلب الدخول بالبصمة
-        Route::post('/login-options', [BiometricAuthController::class, 'loginOptions']);
+        Route::post('/login-options', [BiometricAuthController::class, 'loginOptions'])
+            ->middleware('throttle:10,1');
 
         // تأكيد الدخول بالبصمة
-        Route::post('/login-confirm', [BiometricAuthController::class, 'loginConfirm']);
+        Route::post('/login-confirm', [BiometricAuthController::class, 'loginConfirm'])
+            ->middleware('throttle:10,1');
     });
 
 
-    Route::middleware(['auth:sanctum'])->group(function () {
+    // Authenticated Routes
+
+    Route::middleware([
+        'auth:sanctum',
+        'verified',
+        'active'
+    ])->group(function () {
 
         // الملف الشخصي
         Route::get('/profile', [AuthController::class, 'profile']);
@@ -59,8 +71,10 @@ Route::prefix('v1')->group(function () {
         Route::post('/logout', [AuthController::class, 'logout']);
 
 
+        // Biometric Management
 
         Route::prefix('biometric')->group(function () {
+
             // طلب تسجيل بصمة جديدة
             Route::post('/register-options', [BiometricAuthController::class, 'registerOptions']);
 
@@ -75,69 +89,32 @@ Route::prefix('v1')->group(function () {
         });
 
 
-        // مسارات المدير
+        // Admin Routes
 
-        Route::middleware(['verified', 'role:admin'])->prefix('admin')->group(function () {
-            // عرض الطلبات المعلقة
-            Route::get('/pending-registrations', [AdminController::class, 'pendingRegistrations']);
 
-            // الموافقة على مستخدم
-            Route::post('/approve-user/{userId}', [AdminController::class, 'approveUser']);
+        Route::middleware('role:admin')
+            ->prefix('admin')
+            ->group(function () {
 
-            // رفض مستخدم
-            Route::delete('/reject-user/{userId}', [AdminController::class, 'rejectUser']);
+                // الطلبات المعلقة
+                Route::get('/pending-registrations', [AdminController::class, 'pendingRegistrations']);
 
-            // عرض تفاصيل مستخدم
-            Route::get('/user/{userId}', [AdminController::class, 'userDetails']);
+                // الموافقة على مستخدم
+                Route::post('/approve-user/{userId}', [AdminController::class, 'approveUser']);
+                // رفض مستخدم
+                Route::delete('/reject-user/{userId}', [AdminController::class, 'rejectUser']);
 
-            // قائمة المعلمين
-            Route::get('/teachers', [AdminController::class, 'listTeachers']);
+                // تفاصيل مستخدم
+                Route::get('/user/{userId}', [AdminController::class, 'userDetails']);
 
-            // قائمة الطلاب
-            Route::get('/students', [AdminController::class, 'listStudents']);
+                // قائمة المعلمين
+                Route::get('/teachers', [AdminController::class, 'listTeachers']);
 
-            // إحصائيات لوحة التحكم
-            Route::get('/dashboard-stats', [AdminController::class, 'dashboardStats']);
-        });
+                // قائمة الطلاب
+                Route::get('/students', [AdminController::class, 'listStudents']);
 
+                // إحصائيات لوحة التحكم
+                Route::get('/dashboard-stats', [AdminController::class, 'dashboardStats']);
+            });
     });
 });
-
-/*
-| Routes Summary
-|
-| PUBLIC (بدون توثيق):
-|   POST   /api/v1/login
-|   POST   /api/v1/register/student
-|   POST   /api/v1/register/teacher
-|   POST   /api/v1/verify-account
-|   POST   /api/v1/resend-verification
-|   POST   /api/v1/forgot-password
-|   GET    /api/v1/password/reset/{token}
-|   POST   /api/v1/password/reset
-|   POST   /api/v1/check-password-strength
-|   POST   /api/v1/biometric/login-options
-|   POST   /api/v1/biometric/login-confirm
-|
-| PROTECTED (يحتاج توثيق):
-|   GET    /api/v1/profile
-|   POST   /api/v1/change-password
-|   POST   /api/v1/logout
-|   GET    /api/v1/active-devices
-|   DELETE /api/v1/devices/{tokenId}
-|   GET    /api/v1/login-history
-|   POST   /api/v1/biometric/register-options
-|   POST   /api/v1/biometric/register-confirm
-|   GET    /api/v1/biometric/credentials
-|   DELETE /api/v1/biometric/credentials/{credentialId}
-|
-| ADMIN (يحتاج صلاحية admin):
-|   GET    /api/v1/admin/pending-registrations
-|   POST   /api/v1/admin/approve-user/{userId}
-|   DELETE /api/v1/admin/reject-user/{userId}
-|   GET    /api/v1/admin/user/{userId}
-|   GET    /api/v1/admin/teachers
-|   GET    /api/v1/admin/students
-|   GET    /api/v1/admin/dashboard-stats
-|
-*/
