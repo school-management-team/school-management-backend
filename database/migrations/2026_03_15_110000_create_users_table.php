@@ -11,19 +11,18 @@ return new class extends Migration
     {
         Schema::create('users', function (Blueprint $table) {
             $table->id();
+            $table->string('user_name');
             $table->string('email')->nullable()->unique();
             $table->string('password');
             $table->enum('role', ['admin', 'supervisor', 'teacher', 'student', 'guardian']);
             $table->string('phone')->nullable()->unique();
-            $table->boolean('is_active')->default(false);
+            $table->enum('gender', ['male', 'female']);
+            $table->date('birth_date');
+
+            $table->enum('status', ['unverified', 'pending', 'active','rejected'])->default('unverified');
+
             $table->timestamp('email_verified_at')->nullable();
             $table->timestamp('last_login_at')->nullable();
-
-
-            // المفاتيح الأجنبية
-            $table->foreignId('teacher_id')->nullable()->constrained('teachers')->nullOnDelete();
-            $table->foreignId('student_id')->nullable()->constrained('students')->nullOnDelete();
-            $table->foreignId('guardian_id')->nullable()->constrained('guardians')->nullOnDelete();
 
             // تفعيل البريد
             $table->string('verification_code', 6)->nullable();
@@ -38,13 +37,7 @@ return new class extends Migration
             $table->timestamps();
             $table->softDeletes();
 
-            // الفهارس
-            $table->index('role');
-            $table->index('is_active');
 
-            $table->index('teacher_id');
-            $table->index('student_id');
-            $table->index('guardian_id');
         });
     }
 

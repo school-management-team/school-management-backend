@@ -10,10 +10,12 @@ return new class extends Migration
     {
         Schema::create('guardians', function (Blueprint $table) {
             $table->id();
-            $table->string('guardian_name');
             $table->enum('relationship', ['father', 'mother'])->default('father');
             $table->integer('number_of_children');
-            $table->enum('status', ['unverified', 'pending', 'active'])->default('unverified');
+            $table->string('verification_student_number')->nullable();
+
+            $table->foreignId('user_id')->constrained('users');
+
             $table->timestamps();
             $table->softDeletes();
         });

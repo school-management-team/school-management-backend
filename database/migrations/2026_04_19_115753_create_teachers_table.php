@@ -11,21 +11,17 @@ return new class extends Migration
     {
         Schema::create('teachers', function (Blueprint $table) {
             $table->id();
-            $table->string('teacher_name');
-            $table->date('birth_date');
-            $table->enum('gender', ['male', 'female']);
+
             // المعلومات المهنية
-            $table->string('grade');
-            $table->enum('education_level', ['primary', 'middle', 'high']);
+            $table->enum('education_level', ['primary', 'middle','high']);
+            $table->string('school_class');
             $table->string('specialization');
 
             // المستندات
-            $table->string('cv');
+            $table->text('cv');
             $table->string('legal_document_path');
 
-            // الحالة والتقييم
-            $table->enum('status', ['unverified', 'pending', 'active', 'on_leave', 'terminated'])->default('unverified');
-
+            $table->foreignId('user_id')->constrained('users');
             $table->timestamps();
             $table->softDeletes();
 

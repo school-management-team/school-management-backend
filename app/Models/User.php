@@ -7,34 +7,22 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
-use Laragear\WebAuthn\Contracts\WebAuthnAuthenticatable;
-use Laragear\WebAuthn\WebAuthnAuthentication;
 
-
-class User extends Authenticatable implements WebAuthnAuthenticatable
+class User extends Authenticatable
 {
-    use  HasApiTokens;
-    use HasFactory, Notifiable, SoftDeletes;
-    use WebAuthnAuthentication;
+    use HasApiTokens, HasFactory, Notifiable, SoftDeletes;
 
     protected $fillable = [
-       'email',
+        'user_name',
+        'email',
         'password',
         'role',
         'phone',
-        'is_active',
-        'email_verified_at',
-        'last_login_at',
-        'teacher_id',
-        'student_id',
-        'guardian_id',
+        'gender',
+        'birth_date',
+        'status',
         'verification_code',
         'verification_expires_at',
-        'password_changed_at',
-        'failed_attempts',
-        'locked_until',
-        'remember_token',
-        'remember_expires_at',
     ];
 
     protected $hidden = [
@@ -44,7 +32,7 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
     ];
 
     protected $casts = [
-         'is_active' => 'boolean',
+        'birth_date' => 'date',
         'email_verified_at' => 'datetime',
         'last_login_at' => 'datetime',
         'verification_expires_at' => 'datetime',
@@ -52,64 +40,98 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
         'locked_until' => 'datetime',
     ];
 
-    // العلاقات
+    /*
+    |--------------------------------------------------------------------------
+    | Relationships
+    |--------------------------------------------------------------------------
+    */
+
     public function teacher()
     {
-        return $this->belongsTo(Teacher::class);
-
-
+        return $this->hasOne(Teacher::class);
     }
 
     public function student()
     {
-        return $this->belongsTo(Student::class);
+        return $this->hasOne(Student::class);
     }
+
     public function guardian()
     {
-        return $this->belongsTo(Guardian::class);
+        return $this->hasOne(Guardian::class);
     }
-    //الأدوار
+    public function supervisor()
+    {
+        return $this->hasOne(Supervisor::class);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Roles
+    |--------------------------------------------------------------------------
+    */
+
     public function isTeacher(): bool
     {
         return $this->role === 'teacher';
     }
-    public function isGuardian(): bool
+
+    public function isSupervisor(): bool
     {
-    return $this->role === 'guardian';
+        return $this->role === 'supervisor';
     }
+
 
     public function isStudent(): bool
     {
         return $this->role === 'student';
     }
-    public function isAdmin(): bool
+
+    public function isGuardian(): bool
     {
-    return $this->role === 'admin';
+        return $this->role === 'guardian';
     }
 
 
+    public function isAdmin(): bool
+    {
+        return $this->role === 'admin';
+    }
 
     public function profile()
     {
-    if ($this->isTeacher()) return $this->teacher;
-    if ($this->isStudent()) return $this->student;
-    if ($this->isGuardian()) return $this->guardian;
-    return null;
+        if ($this->isTeacher()) {
+            return $this->teacher;
+        }
+
+        if ($this->isStudent()) {
+            return $this->student;
+        }
+
+        if ($this->isGuardian()) {
+            return $this->guardian;
+        }
+        if($this->isSupervisor()){
+            return $this->supervisor;
+        }
+
+        return null;
     }
 
+    /*
+    |--------------------------------------------------------------------------
+    | Login Security
+    |--------------------------------------------------------------------------
+    */
 
-    //  إدارة التوكنات
-
-
-
-
-    //  الحماية من محاولات الدخول
     public function recordFailedAttempt(): void
     {
         $this->increment('failed_attempts');
 
         if ($this->failed_attempts >= 5) {
-            $this->update(['locked_until' => now()->addMinutes(30)]);
+            $this->update([
+                'locked_until' => now()->addMinutes(30),
+            ]);
         }
     }
 
@@ -117,7 +139,7 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
     {
         $this->update([
             'failed_attempts' => 0,
-            'locked_until' => null
+            'locked_until' => null,
         ]);
     }
 
@@ -128,7 +150,10 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
         }
 
         if ($this->locked_until->isPast()) {
-            $this->update(['locked_until' => null]);
+            $this->update([
+                'locked_until' => null,
+            ]);
+
             return false;
         }
 
@@ -137,7 +162,10 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
 
     public function getLockRemainingMinutes(): int
     {
-        return max(0,now()->diffInMinutes($this->locked_until,false));
+        return max(
+            0,
+            now()->diffInMinutes($this->locked_until, false)
+        );
     }
 
     public function getRemainingAttempts(): int
@@ -145,14 +173,18 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
         return max(0, 5 - $this->failed_attempts);
     }
 
-    //  تفعيل البريد الإلكتروني
+    /*
+    |--------------------------------------------------------------------------
+    | Email Verification
+    |--------------------------------------------------------------------------
+    */
+
     public function generateVerificationCode(): string
     {
         $code = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
-
         $this->update([
             'verification_code' => $code,
-            'verification_expires_at' => now()->addMinutes(30)
+            'verification_expires_at' => now()->addMinutes(30),
         ]);
 
         return $code;
@@ -160,47 +192,43 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
 
     public function verifyCode(string $code): bool
     {
+
         if (!$this->verification_code || !$this->verification_expires_at) {
+
             return false;
         }
 
         if ($this->verification_expires_at->isPast()) {
+
             return false;
         }
 
         if ($this->verification_code !== $code) {
+
             return false;
         }
-        if($this->isStudent()){
-            $this->student()->update(['status'=>'pending']);
-        }
-
-        if($this->isTeacher()){
-            $this->teacher()->update(['status'=>'pending']);
-        }
-        if($this->isGuardian()){
-            $this->guardian()->update(['status'=>'pending']);
-        }
-
 
         $this->update([
-            'email_verified_at' =>$this->email_verified_at ?? now(), //اذا لم يكن مفعل
+            'email_verified_at' => $this->email_verified_at ?? now(),
             'verification_code' => null,
-            'verification_expires_at' => null
+            'verification_expires_at' => null,
         ]);
 
         return true;
     }
+
+
 
     public function isVerified(): bool
     {
         return !is_null($this->email_verified_at);
     }
 
-    //  Scopes
+
+
     public function scopeActive($query)
     {
-        return $query->where('is_active', true);
+        return $query->where('status', 'active');
     }
 
     public function scopeByRole($query, string $role)
@@ -224,41 +252,33 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
     }
 
 
+    //Student Number
 
-    //  الحصول على الرقم المدرسي
-    public static function getNextStudentNumberForGrade(string $grade): string
+    public static function getNextStudentNumberForGrade(string $class): string
     {
-        // تحديد نطاق الأرقام حسب الصف
         $ranges = config('school.student_number_ranges');
 
-        if (!isset($ranges[$grade])) {
-            throw new \Exception("الصف {$grade} غير معرف في نظام الترقيم");
+        if (!isset($ranges[$class])) {
+            throw new \Exception("الصف {$class} غير معرف");
         }
 
-        $start = $ranges[$grade]['start'];
-        $end = $ranges[$grade]['end'];
+        $start = $ranges[$class]['start'];
+        $end = $ranges[$class]['end'];
+        $lastStudent = Student::where('school_class', $class)
+            ->whereNotNull('student_number')
+            ->orderByDesc('student_number')
+            ->first();
 
-       // البحث عن آخر رقم مستخدم في هذا الصف
-        $lastStudent = Student::where('grade', $grade)
-        ->whereNotNull('student_number')
-        ->orderBy('student_number', 'desc')
-        ->first();
+        if ($lastStudent) {
+            $number = (int) $lastStudent->student_number + 1;
 
-        if ($lastStudent && $lastStudent->student_number) {
-            // استخراج الرقم من الـ student_number
-            $lastNumber = (int) $lastStudent->student_number;
-            $newNumber = $lastNumber + 1;
-
-            // التأكد من عدم تجاوز النطاق المسموح
-            if ($newNumber > $end) {
-            throw new \Exception("لقد تجاوزت الأرقام المتاحة للصف {$grade} الحد المسموح");
+            if ($number > $end) {
+                throw new \Exception("نفدت الأرقام لهذا الصف");
             }
 
-            return (string) $newNumber;
+            return (string) $number;
         }
 
-        // أول طالب في هذا الصف
         return (string) $start;
     }
-
 }

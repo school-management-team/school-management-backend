@@ -1,120 +1,75 @@
 <?php
 
+use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\AdminController;
-use App\Http\Controllers\BiometricAuthController;
-use Illuminate\Support\Facades\Route;
-
-Route::prefix('v1')->group(function () {
 
 
-    // Public Routes
-
-    // تسجيل الدخول
-    Route::post('/login', [AuthController::class, 'login'])
-        ->middleware('throttle:5,1');
-
-    // تسجيل طالب جديد
-    Route::post('/register/student', [AuthController::class, 'registerStudent'])
-        ->middleware('throttle:3,10');
-
-    // تسجيل معلم جديد
-    Route::post('/register/teacher', [AuthController::class, 'registerTeacher'])
-        ->middleware('throttle:3,10');
-
-    // تفعيل الحساب
-    Route::post('/verify-account', [AuthController::class, 'verifyAccount'])
-        ->middleware('throttle:10,1');
-
-    // إعادة إرسال كود التفعيل
-    Route::post('/resend-verification', [AuthController::class, 'resendVerificationCode'])
-        ->middleware('throttle:3,10');
-
-    // نسيت كلمة المرور
-    Route::post('/forgot-password', [AuthController::class, 'forgotPassword'])
-        ->middleware('throttle:3,10');
-
-    // إعادة تعيين كلمة المرور
-    Route::post('/password/reset', [AuthController::class, 'resetPassword'])
-        ->middleware('throttle:5,10');
+// Public Routes
 
 
-    // Biometric Login
+Route::prefix('auth')->group(function () {
 
-    Route::prefix('biometric')->group(function () {
+    // Login
+    Route::post('/login', [AuthController::class, 'login']);
 
-        // طلب الدخول بالبصمة
-        Route::post('/login-options', [BiometricAuthController::class, 'loginOptions'])
-            ->middleware('throttle:10,1');
+    // Register
+    Route::post('/register/student', [AuthController::class, 'registerStudent']);
+    Route::post('/register/teacher', [AuthController::class, 'registerTeacher']);
+    Route::post('/register/guardian', [AuthController::class, 'registerGuardian']);
+    Route::post('/register/supervisor', [AuthController::class, 'registerSupervisor']);
 
-        // تأكيد الدخول بالبصمة
-        Route::post('/login-confirm', [BiometricAuthController::class, 'loginConfirm'])
-            ->middleware('throttle:10,1');
-    });
+    // Verification
+    Route::post('/verify-account', [AuthController::class, 'verifyAccount']);
+    Route::post('/resend-code', [AuthController::class, 'resendVerificationCode']);
 
+    // Password
+    Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+    Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+});
 
-    // Authenticated Routes
+// Authenticated Users
 
-    Route::middleware([
-        'auth:sanctum',
-        'verified',
-        'active'
-    ])->group(function () {
+Route::middleware([
+    'auth:sanctum' ,
+    'active'
+])->group(function () {
 
-        // الملف الشخصي
-        Route::get('/profile', [AuthController::class, 'profile']);
+    Route::post('/logout', [AuthController::class, 'logout']);
 
-        // تغيير كلمة المرور
-        Route::post('/change-password', [AuthController::class, 'changePassword']);
+    Route::post('/change-password', [AuthController::class, 'changePassword']);
 
-        // تسجيل الخروج
-        Route::post('/logout', [AuthController::class, 'logout']);
-
-
-        // Biometric Management
-
-        Route::prefix('biometric')->group(function () {
-
-            // طلب تسجيل بصمة جديدة
-            Route::post('/register-options', [BiometricAuthController::class, 'registerOptions']);
-
-            // تأكيد تسجيل البصمة
-            Route::post('/register-confirm', [BiometricAuthController::class, 'registerConfirm']);
-
-            // عرض البصمات المسجلة
-            Route::get('/credentials', [BiometricAuthController::class, 'credentials']);
-
-            // حذف بصمة
-            Route::delete('/credentials/{credentialId}', [BiometricAuthController::class, 'deleteCredential']);
-        });
+    Route::get('/profile', [AuthController::class, 'profile']);
+});
 
 
-        // Admin Routes
+
+//admin
+Route::middleware([
+    'auth:sanctum',
+    'active',
+    'role:admin'
+])->prefix('admin')->group(function () {
 
 
-        Route::middleware('role:admin')
-            ->prefix('admin')
-            ->group(function () {
+    Route::get('/pending/students', [AdminController::class, 'pendingStudents']);
+    Route::get('/pending/teachers', [AdminController::class, 'pendingTeachers']);
+    Route::get('/pending/supervisors', [AdminController::class, 'pendingSupervisors']);
+    Route::get('/pending/guardians', [AdminController::class, 'pendingGuardians']);
 
-                // الطلبات المعلقة
-                Route::get('/pending-registrations', [AdminController::class, 'pendingRegistrations']);
 
-                // الموافقة على مستخدم
-                Route::post('/approve-user/{userId}', [AdminController::class, 'approveUser']);
-                // رفض مستخدم
-                Route::delete('/reject-user/{userId}', [AdminController::class, 'rejectUser']);
+    Route::get('/users/{userId}', [AdminController::class, 'userDetails']);
 
-                // تفاصيل مستخدم
-                Route::get('/user/{userId}', [AdminController::class, 'userDetails']);
+    Route::post('/users/{userId}/approve', [AdminController::class, 'approveUser']);
 
-                // قائمة المعلمين
-                Route::get('/teachers', [AdminController::class, 'listTeachers']);
+    Route::post('/users/{userId}/reject', [AdminController::class, 'rejectUser']);
 
-                // قائمة الطلاب
-                Route::get('/students', [AdminController::class, 'listStudents']);
 
-                // إحصائيات لوحة التحكم
-                Route::get('/dashboard-stats', [AdminController::class, 'dashboardStats']);
-            });
-    });
+    Route::get('/dashboard', [AdminController::class, 'dashboardStats']);
+
+
+    Route::get('/teachers', [AdminController::class, 'listTeachers']);
+
+    Route::get('/students', [AdminController::class, 'listStudents']);
+
 });

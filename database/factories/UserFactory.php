@@ -13,6 +13,7 @@ class UserFactory extends Factory
     public function definition(): array
     {
         return [
+            'user_name'=>fake()->name(),
             'email' => fake()->unique()->safeEmail(),
 
             'password' => Hash::make('password123'),
@@ -25,51 +26,10 @@ class UserFactory extends Factory
 
             'phone' => fake()->unique()->numerify('09########'),
 
-            'is_active' => true,
-
-            'email_verified_at' => now(),
-
-            'last_login_at' => now(),
-
-            'password_changed_at' => now(),
-
-            'failed_attempts' => 0,
-
-            'locked_until' => null,
-
-            'student_id' => null,
-
-            'teacher_id' => null,
-
-            'guardian_id' => null,
+            'gender'=>fake()->randomElement(['male','female']),
+            'birth_date'=>fake()->date(),
+            'status'=>'active'
         ];
     }
 
-    public function active(): static
-    {
-        return $this->state(fn () => [
-            'is_active' => true,
-        ]);
-    }
-
-    public function pending(): static
-    {
-        return $this->state(fn () => [
-            'is_active' => false,
-        ]);
-    }
-
-    public function teacher(): static
-    {
-        return $this->state(fn () => [
-            'role' => 'teacher',
-        ]);
-    }
-
-    public function student(): static
-    {
-        return $this->state(fn () => [
-            'role' => 'student',
-        ]);
-    }
 }

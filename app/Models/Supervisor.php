@@ -1,22 +1,20 @@
 <?php
 
 namespace App\Models;
-
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-class Teacher extends Model
-{
-    use HasFactory, SoftDeletes;
 
-    protected $fillable = [
-        'education_level',
-        'school_class',
+class Supervisor extends Model
+{
+     use HasFactory, SoftDeletes;
+        protected $fillable = [
+        'educational_qualification',
         'specialization',
-        'cv',
-        'legal_document_path',
-        'user_id',
+        'bio',
+        'cv_file',
+        'user_id'
     ];
 
     public function user()

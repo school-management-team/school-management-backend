@@ -2,28 +2,31 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Controllers\Controller;
+use App\Models\Supervisor;
 use App\Models\User;
-use App\Models\Teacher;
 use App\Models\Student;
+use App\Models\Teacher;
 use App\Models\Guardian;
 use App\Services\AuthService;
+use App\Services\GuardianVerificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\DB;
 
 class AuthController extends Controller
 {
-    protected $authService;
+    protected AuthService $authService ;
+    protected GuardianVerificationService $guardianVerificationService;
 
-    public function __construct(AuthService $authService)
+    public function __construct(AuthService $authService,GuardianVerificationService $guardianVerificationService)
     {
         $this->authService = $authService;
+        $this->guardianVerificationService=$guardianVerificationService;
     }
 
-
-    // تسجيل الدخول
+    //Login
     public function login(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -39,536 +42,711 @@ class AuthController extends Controller
             ], 422);
         }
 
-
-        $result = $this->authService->login($request->login,
+        $result = $this->authService->login(
+            $request->login,
             $request->password,
-            $request->remember ?? false);
+            $request->remember ?? false
+        );
 
-        $statusCode = $result['success'] ? 200 : 401;
-        return response()->json($result, $statusCode);
+        return response()->json(
+            $result,
+            $result['success'] ? 200 : 401
+        );
     }
 
 
-    // تسجيل طالب جديد
+    // Register Student
 
-    public function registerStudent(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-            'login' => 'required|string|unique:users,email|unique:users,phone',
-            'password' => 'required|string|min:8|confirmed',
-            'student_name' => 'required|string|max:50',
-            'father_name' => 'required|string|max:50',
-            'mother_name' => 'required|string|max:50',
-            'gender' => 'required|in:male,female',
-            'birth_date' => 'required|date',
-            'education_level' => 'required|in:primary,middle,high',
-            'grade' => 'required|string',
-        ]);
+public function registerStudent(Request $request)
+{
+    $validator = Validator::make($request->all(), [
 
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'errors' => $validator->errors()
-            ], 422);
-        }
+        'login' => 'required|string|unique:users,email|unique:users,phone',
 
-        try {
-                // تحديد إذا كان بريد أو رقم
-                if (filter_var($request->login, FILTER_VALIDATE_EMAIL)) {
-                    $email = $request->login;
-                    $phone = null;
-                } else {
-                    $email = null;
-                    $phone = $request->login;
-                }
-            $student = Student::create([
-                'student_name' => $request->student_name,
-                'father_name' => $request->father_name,
-                'mother_name' => $request->mother_name,
-                'gender' => $request->gender,
-                'birth_date' => $request->birth_date,
-                'education_level' => $request->education_level,
-                'grade' => $request->grade,
-                'status' => 'unverified',
-                'enrollment_date' => now(),
-            ]);
+        'password' => 'required|string|min:8|confirmed',
 
-            if (!$student || !$student->id) {
-                throw new \Exception('فشل في إنشاء سجل الطالب');
-            }
-            if ($request->has('guardian_id') && $request->guardian_id) {
-            $student->guardians()->attach($request->guardian_id, [
-                'relationship' => $request->guardian_relationship,
-                'is_primary' => true
-            ]);
-        }
+        'user_name' => 'required|string|max:100',
 
-            $user = User::create([
-               'email' => $email,
-                'phone' => $phone,
-                'password' => Hash::make($request->password),
-                'role' => 'student',
-                'student_id' => $student->id,
-                'is_active' => false,
-                'password_changed_at' => now()
-            ]);
+        'gender' => 'required|in:male,female',
 
-            if (!$user || !$user->id) {
-                throw new \Exception('فشل في إنشاء سجل المستخدم');
-            }
+        'birth_date' => 'required|date',
 
-            //  إرسال كود تفعيل البريد
-            $code = $user->generateVerificationCode();
-            $whatsappLink= $this->sendVerificationCode($user, $code);
+        'father_name' => 'required|string|max:100',
 
-            $responseData = [
-                'user_id' => $user->id,
-                'requires_verification' => true
-            ];
+        'mother_name' => 'required|string|max:100',
 
-            if ($whatsappLink) {
-                $responseData['whatsapp_link'] = $whatsappLink;
-                $message = 'تم التسجيل بنجاح. جاري توجيهك إلى واتساب للتفعيل...';
-            } else {
-                $message = 'تم التسجيل بنجاح. يرجى تفعيل بريدك الإلكتروني.';
-            }
+        'education_level' => 'required|in:primary,middle,high',
 
-            return response()->json([
-                'success' => true,
-                'message' => $message,
-                'data' => $responseData
-            ], 201);
+        'school_class' => 'required|string|min:1|max:12',
 
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'حدث خطأ أثناء التسجيل'
-            ], 500);
-        }
-    }
+    ]);
 
-    // تسجيل معلم جديد
+    if ($validator->fails()) {
 
-    public function registerTeacher(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-           'login' => 'required|string|unique:users,email|unique:users,phone',
-           'password' => 'required|string|min:8|confirmed',
-            'teacher_name' => 'required|string|max:50',
-            'gender' => 'required|in:male,female',
-            'birth_date' => 'required|date',
-            'education_level' => 'required|in:primary,middle,high',
-            'grade' => 'required|string',
-            'specialization' => 'required|string',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'errors' => $validator->errors()
-            ], 422);
-        }
-
-        try {
-            //  تحديد إذا كان بريد أو رقم
-            if (filter_var($request->login, FILTER_VALIDATE_EMAIL)) {
-                $email = $request->login;
-                $phone = null;
-            } else {
-                $email = null;
-                $phone = $request->login;
-            }
-
-            $teacher = Teacher::create([
-                'teacher_name' => $request->teacher_name,
-                'gender' => $request->gender,
-                'birth_date' => $request->birth_date,
-                'education_level' => $request->education_level,
-                'grade' => $request->grade,
-                'specialization' => $request->specialization,
-                'status' => 'unverified',
-            ]);
-
-            $user = User::create([
-                'email' => $email,
-                'phone' => $phone,
-                'password' => Hash::make($request->password),
-                'role' => 'teacher',
-                'teacher_id' => $teacher->id,
-                'is_active' => false,
-                'password_changed_at' => now()
-            ]);
-
-            if (!$user || !$user->id) {
-                throw new \Exception('فشل في إنشاء سجل المستخدم');
-            }
-
-            //  إرسال كود تفعيل البريد
-            $code = $user->generateVerificationCode();
-            $whatsappLink=$this->sendVerificationCode($user, $code);
-
-            $responseData = [
-                'user_id' => $user->id,
-                'requires_verification' => true
-            ];
-
-            if ($whatsappLink) {
-
-                $responseData['whatsapp_link'] = $whatsappLink;
-                $message = 'تم التسجيل بنجاح. جاري توجيهك إلى واتساب للتفعيل...';
-            } else {
-                $message = 'تم التسجيل بنجاح. يرجى تفعيل بريدك الإلكتروني.';
-            }
-
-            return response()->json([
-                'success' => true,
-                'message' => $message,
-                'data' => $responseData
-            ], 201);
-
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'حدث خطأ أثناء التسجيل'
-            ], 500);
-        }
-    }
-
-    // تسجيل ولي أمر جديد
-    public function registerGuardian(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-            'login' => 'required|string|unique:users,email|unique:users,phone',
-            'guardian_name' => 'required|string|max:50',
-            'relationship' => 'required|in:father,mother',
-            'number_of_children' => 'required|integer|min:0|max:20',
-            'password' => 'required|string|min:8|confirmed',
-
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'errors' => $validator->errors()
-            ], 422);
-        }
-
-        try {
-
-            if (filter_var($request->login, FILTER_VALIDATE_EMAIL)) {
-                $email = $request->login;
-                $phone = null;
-            } else {
-                $email = null;
-                $phone = $request->login;
-            }
-
-            $guardian = Guardian::create([
-            'guardian_name' => $request->guardian_name,
-            'relationship' => $request->relationship,
-            'number_of_children'=>$request->number_of_children
-            ]);
-
-            $user = User::create([
-                'email' => $email,
-                'phone' => $phone,
-                'password' => Hash::make($request->password),
-                'role' => 'guardian',
-                'guardian_id' => $guardian->id,
-                'is_active' => true,
-                'password_changed_at' => now()
-            ]);
-
-            $code = $user->generateVerificationCode();
-            $whatsappLink=$this->sendVerificationCode($user, $code);
-
-            $responseData = [
-                'user_id' => $user->id,
-                'requires_verification' => true
-            ];
-
-            if ($whatsappLink) {
-                $responseData['whatsapp_link'] = $whatsappLink;
-                $message = 'تم التسجيل بنجاح. جاري توجيهك إلى واتساب للتفعيل...';
-            } else {
-                $message = 'تم التسجيل بنجاح. يرجى تفعيل بريدك الإلكتروني.';
-            }
-
-            return response()->json([
-                'success' => true,
-                'message' => $message,
-                'data' => $responseData
-            ], 201);
-
-        } catch (\Exception $e) {
-            return response()->json([
+        return response()->json([
             'success' => false,
-            'message' => 'حدث خطأ أثناء التسجيل'
-            ], 500);
-        }
+            'errors' => $validator->errors()
+        ], 422);
+
     }
 
-    // تفعيل البريد الإلكتروني
+    DB::beginTransaction();
 
-    public function verifyAccount(Request $request)
-    {
+    try {
 
-        $validator = Validator::make($request->all(), [
-            'login' => 'required|string',
-            'code' => 'required|string|size:6'
+        // إنشاء المستخدم
+        $user = $this->authService->createUser(
+            $request->all(),
+            'student'
+        );
+
+        // إنشاء بيانات الطالب
+        Student::create([
+
+            'user_id' => $user->id,
+
+            'father_name' => $request->father_name,
+
+            'mother_name' => $request->mother_name,
+
+            'education_level' => $request->education_level,
+
+            'school_class' => $request->school_class,
+
+            'enrollment_date' => now(),
+
         ]);
 
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'errors' => $validator->errors()
-            ], 422);
-        }
+        // إنشاء كود التحقق
+        $code = $user->generateVerificationCode();
 
-        $user = filter_var($request->login, FILTER_VALIDATE_EMAIL)
-            ? User::where('email', $request->login)->first()
-            : User::where('phone', $request->login)->first();
+        // إرسال الكود
+        $link = $this->sendVerificationCode($user, $code);
 
-        if (!$user) {
-            return response()->json([
-                'success' => false,
-                'message' => 'المستخدم غير موجود'
-            ], 404);
-        }
+        DB::commit();
 
-        if ($user->verifyCode($request->code)) {
+        return response()->json([
 
-            return response()->json([
-                'success' => true,
-                'message' => 'تم التفعيل بنجاح'
-            ]);
-        }
+            'success' => true,
 
+            'message' => 'تم إنشاء الحساب بنجاح بانتظار موافقة الادارة.',
+
+            'data' => [
+
+                'user_id' => $user->id,
+
+                'requires_verification' => true,
+
+                'whatsapp_link' => $link
+
+            ]
+
+        ], 201);
+
+    } catch (\Exception $e) {
+
+        DB::rollBack();
+
+        return response()->json([
+
+            'success' => false,
+
+            'message' => 'حدث خطأ أثناء التسجيل',
+
+            'error' => config('app.debug') ? $e->getMessage() : null
+
+        ], 500);
+
+    }
+}
+
+// Register Teacher
+
+
+public function registerTeacher(Request $request)
+{
+    $validator = Validator::make($request->all(), [
+
+        'login' => 'required|string|unique:users,email|unique:users,phone',
+
+        'password' => 'required|string|min:8|confirmed',
+
+        'user_name' => 'required|string|max:100',
+
+        'gender' => 'required|in:male,female',
+
+        'birth_date' => 'required|date',
+
+        'education_level' => 'required|in:primary,middle,high',
+
+        'school_class' => 'required|string|min:1|max:12',
+
+        'specialization' => 'required|string|max:100',
+
+        'cv' => 'required|string|max:5000',
+
+        'legal_document_path' => 'required|file|mimes:pdf,jpg,jpeg,png|max:4096',
+
+    ]);
+
+    if ($validator->fails()) {
+
+        return response()->json([
+            'success' => false,
+            'errors' => $validator->errors()
+        ], 422);
+
+    }
+
+    DB::beginTransaction();
+
+    try {
+
+        // إنشاء المستخدم
+        $user = $this->authService->createUser(
+            $request->all(),
+            'teacher'
+        );
+
+        // رفع الملف
+        $documentPath = $request
+            ->file('legal_document_path')
+            ->store('legal_documents', 'public');
+
+        // إنشاء بيانات المعلم
+        Teacher::create([
+
+            'user_id' => $user->id,
+
+            'education_level' => $request->education_level,
+
+            'school_class' => $request->school_class,
+
+            'specialization' => $request->specialization,
+
+            'cv' => $request->cv,
+
+            'legal_document_path' => $documentPath,
+
+        ]);
+
+        // إرسال كود التحقق
+        $code = $user->generateVerificationCode();
+
+        $link = $this->sendVerificationCode($user, $code);
+
+        DB::commit();
+
+        return response()->json([
+
+            'success' => true,
+
+            'message' => 'تم إنشاء الحساب بنجاح بانتظار موافقة الادارة.',
+
+            'data' => [
+
+                'user_id' => $user->id,
+
+                'requires_verification' => true,
+
+                'whatsapp_link' => $link
+
+            ]
+
+        ], 201);
+
+    } catch (\Exception $e) {
+
+        DB::rollBack();
+
+        return response()->json([
+
+            'success' => false,
+
+            'message' => 'حدث خطأ أثناء التسجيل',
+
+            'error' => config('app.debug') ? $e->getMessage() : null
+
+        ], 500);
+
+    }
+}
+
+public function registerGuardian(Request $request)
+{
+    $validator = Validator::make($request->all(), [
+
+        'login' => 'required|string|unique:users,email|unique:users,phone',
+
+        'password' => 'required|string|min:8|confirmed',
+
+        'user_name' => 'required|string|max:100',
+
+        'gender' => 'required|in:male,female',
+
+        'birth_date' => 'required|date',
+
+        'relationship' => 'required|in:father,mother',
+
+        'verification_student_number' => 'required|string',
+
+        'number_of_children' => 'required|integer|min:0|max:20'
+
+    ]);
+
+    if ($validator->fails()) {
+
+        return response()->json([
+            'success' => false,
+            'errors' => $validator->errors()
+        ], 422);
+
+    }
+
+    DB::beginTransaction();
+
+    try {
+
+        // إنشاء المستخدم
+        $user = $this->authService->createUser(
+            $request->all(),
+            'guardian'
+        );
+
+        // إنشاء بيانات ولي الأمر
+        Guardian::create([
+
+            'user_id' => $user->id,
+
+            'relationship' => $request->relationship,
+
+            'verification_student_number' => $request->verification_student_number,
+
+            'number_of_children' =>$request->number_of_children
+
+        ]);
+
+        // إرسال كود التحقق
+        $code = $user->generateVerificationCode();
+
+        $link = $this->sendVerificationCode($user, $code);
+
+        DB::commit();
+
+        return response()->json([
+
+            'success' => true,
+
+            'message' => 'تم إنشاء الحساب بنجاح بانتظار موافقة الادارة. ',
+
+            'data' => [
+
+                'user_id' => $user->id,
+
+                'requires_verification' => true,
+
+                'whatsapp_link' => $link
+
+            ]
+
+        ], 201);
+
+    } catch (\Exception $e) {
+
+        DB::rollBack();
+
+        return response()->json([
+
+            'success' => false,
+
+            'message' => 'حدث خطأ أثناء التسجيل',
+
+            'error' => config('app.debug') ? $e->getMessage() : null
+
+        ], 500);
+
+    }
+}
+
+public function registerSupervisor(Request $request)
+{
+    $validator = Validator::make($request->all(), [
+
+        'login' => 'required|string|unique:users,email|unique:users,phone',
+
+        'password' => 'required|string|min:8|confirmed',
+
+        'user_name' => 'required|string|max:100',
+
+        'gender' => 'required|in:male,female',
+
+        'birth_date' => 'required|date',
+
+        'educational_qualification' => 'required|in:bachelor,master,doctorate',
+
+        'specialization' => 'required|string|max:100',
+
+        'bio' => 'required|string|max:5000',
+
+        'cv_file' => 'required|file|mimes:pdf,jpg,jpeg,png|max:4096',
+
+    ]);
+
+    if ($validator->fails()) {
+
+        return response()->json([
+            'success' => false,
+            'errors' => $validator->errors()
+        ], 422);
+
+    }
+
+    DB::beginTransaction();
+
+    try {
+
+        // إنشاء المستخدم
+        $user = $this->authService->createUser(
+            $request->all(),
+            'supervisor'
+        );
+
+        // رفع الملف
+        $cvPath = $request
+            ->file('cv_file')
+            ->store('supervisors/cv', 'public');
+
+        // إنشاء بيانات المشرف
+        Supervisor::create([
+
+            'user_id' => $user->id,
+
+            'educational_qualification' => $request->educational_qualification,
+
+            'specialization' => $request->specialization,
+
+            'bio' => $request->bio,
+
+            'cv_file' => $cvPath,
+
+        ]);
+
+        // إنشاء وإرسال كود التحقق
+        $code = $user->generateVerificationCode();
+
+        $link = $this->sendVerificationCode($user, $code);
+
+        DB::commit();
+
+        return response()->json([
+
+            'success' => true,
+
+            'message' => 'تم إنشاء الحساب بنجاح بانتظار موافقة الادارة.',
+
+            'data' => [
+
+                'user_id' => $user->id,
+
+                'requires_verification' => true,
+
+                'whatsapp_link' => $link
+
+            ]
+
+        ], 201);
+
+    } catch (\Exception $e) {
+
+        DB::rollBack();
+
+        return response()->json([
+
+            'success' => false,
+
+            'message' => 'حدث خطأ أثناء التسجيل',
+
+            'error' => config('app.debug') ? $e->getMessage() : null
+
+        ], 500);
+
+    }
+}
+
+// Forgot Password
+public function forgotPassword(Request $request)
+{
+    $validator = Validator::make($request->all(), [
+        'login' => 'required|string'
+    ]);
+
+    if ($validator->fails()) {
+        return response()->json([
+            'success' => false,
+            'errors' => $validator->errors()
+        ], 422);
+    }
+
+    $user = filter_var($request->login, FILTER_VALIDATE_EMAIL)
+        ? User::where('email', $request->login)->first()
+        : User::where('phone', $request->login)->first();
+
+    if (!$user) {
+        return response()->json([
+            'success' => false,
+            'message' => 'الحساب غير موجود'
+        ], 404);
+    }
+
+    $code = $user->generateVerificationCode();
+
+    $link = $this->sendVerificationCode($user, $code);
+
+    return response()->json([
+        'success' => true,
+        'message' => 'تم إرسال رمز إعادة تعيين كلمة المرور.',
+        'data' => [
+            'whatsapp_link' => $link
+        ]
+    ]);
+}
+
+// Reset Password
+public function resetPassword(Request $request)
+{
+    $validator = Validator::make($request->all(), [
+
+        'login' => 'required|string',
+
+        'code' => 'required|string|size:6',
+
+        'password' => 'required|string|min:8|confirmed'
+
+    ]);
+
+    if ($validator->fails()) {
+
+        return response()->json([
+            'success' => false,
+            'errors' => $validator->errors()
+        ], 422);
+
+    }
+
+    $result = $this->authService->confirmPasswordReset(
+
+        $request->login,
+
+        $request->code,
+
+        $request->password
+
+    );
+
+    return response()->json(
+
+        $result,
+
+        $result['success'] ? 200 : 400
+
+    );
+}
+public function logout(Request $request)
+{
+    $result = $this->authService->logout($request->user());
+
+    return response()->json($result);
+}
+public function changePassword(Request $request)
+{
+    $validator = Validator::make($request->all(), [
+        'current_password' => 'required|string',
+        'new_password' => 'required|string|min:8|confirmed',
+    ]);
+
+    if ($validator->fails()) {
+        return response()->json([
+            'success' => false,
+            'errors' => $validator->errors(),
+        ], 422);
+    }
+
+    $result = $this->authService->changePassword(
+        $request->user(),
+        $request->current_password,
+        $request->new_password
+    );
+
+    return response()->json(
+        $result,
+        $result['success'] ? 200 : 400
+    );
+}
+
+public function verifyAccount(Request $request)
+{
+    $validator = Validator::make($request->all(), [
+        'login' => 'required|string',
+        'code' => 'required|string|size:6'
+    ]);
+
+    if ($validator->fails()) {
+        return response()->json([
+            'success' => false,
+            'errors' => $validator->errors()
+        ], 422);
+    }
+
+    $user = filter_var($request->login, FILTER_VALIDATE_EMAIL)
+        ? User::where('email', $request->login)->first()
+        : User::where('phone', $request->login)->first();
+
+    if (!$user) {
+        return response()->json([
+            'success' => false,
+            'message' => 'المستخدم غير موجود'
+        ], 404);
+    }
+
+    if (!$user->verifyCode($request->code)) {
         return response()->json([
             'success' => false,
             'message' => 'رمز التحقق غير صحيح أو منتهي الصلاحية'
         ], 400);
     }
+    if($user->isGuardian()){
+        $studentNumber=$user->guardian->verification_student_number;
+        $result=$this->guardianVerificationService->verifyAndLink($user->guardian,$studentNumber);
 
-
-    // إعادة إرسال كود التفعيل
-
-    public function resendVerificationCode(Request $request)
-    {
-        $validator = Validator::make($request->all(), ['login' => 'required|string']);
-        if ($validator->fails()) {
-            return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+        if(!$result['success']){
+            return response()->json($result,400);
+        }else{
+            $user->update(['status'=>'pending']);
         }
 
-        $user = filter_var($request->login, FILTER_VALIDATE_EMAIL)
-            ? User::where('email', $request->login)->first()
-            : User::where('phone', $request->login)->first();
+    }else{
+        $user->update(['status'=>'pending']);
+    }
 
-        if (!$user) {
-            return response()->json(['success' => false, 'message' => 'المستخدم غير موجود'], 404);
-        }
 
-        if ($user->isVerified()) {
-            return response()->json(['success' => false, 'message' => 'الحساب مفعل مسبقاً'], 400);
-        }
+    return response()->json([
+        'success' => true,
+        'message' => 'تم تفعيل الحساب بنجاح، بانتظار موافقة الإدارة.'
+    ]);
+}
+public function resendVerificationCode(Request $request)
+{
+    $validator = Validator::make($request->all(), [
+        'login' => 'required|string'
+    ]);
 
-        $code = $user->generateVerificationCode();
-        $this->sendVerificationCode($user, $code);
-
-        $responseData = [];
-        $isEmail = filter_var($request->login, FILTER_VALIDATE_EMAIL);
-
-        if ($isEmail) {
-            $message = 'تم إرسال كود التفعيل إلى بريدك الإلكتروني.';
-        } else {
-            $whatsappUrl = "https://wa.me/{$user->phone}?text=" . urlencode("كود تفعيل حسابك: {$code}");
-            $responseData['whatsapp_link'] = $whatsappUrl;
-            $message = 'جاري توجيهك إلى واتساب...';
-        }
-
+    if ($validator->fails()) {
         return response()->json([
-            'success' => true,
-            'message' => $message,
-            'data' => $responseData
-        ]);
-
-    }
-
-    // تسجيل الخروج
-    public function logout(Request $request)
-    {
-        $result = $this->authService->logout($request->user());
-        return response()->json($result);
-    }
-
-
-    public function profile(Request $request)
-    {
-        $user = $request->user();
-
-        // تحميل العلاقات
-        if ($user->isTeacher()) {
-            $user->load('teacher');
-        }
-        if ($user->isStudent()) {
-            $user->load('student');
-        }
-        if ($user->isGuardian()) {
-            $user->load('guardian');
-        }
-
-
-        return response()->json([
-            'success' => true,
-            'data' => $this->authService->formatUser($user)
-        ]);
-    }
-
-
-    // تغيير كلمة المرور
-    public function changePassword(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-            'current_password' => 'required|string',
-            'new_password' => 'required|string|min:8|confirmed'
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'errors' => $validator->errors()
-            ], 422);
-        }
-
-        $result = $this->authService->changePassword(
-            $request->user(),
-            $request->current_password,
-            $request->new_password
-        );
-
-        return response()->json($result, $result['success'] ? 200 : 400);
-    }
-
-
-    // نسيت كلمة المرور
-    public function forgotPassword(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-             'login' => 'required|string'
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'errors' => $validator->errors()
-            ], 422);
-        }
-        $user = filter_var($request->login, FILTER_VALIDATE_EMAIL)
-            ? User::where('email', $request-> login)->first()
-            : User::where('phone', $request-> login)->first();
-
-        if (!$user) {
-            return response()->json([
             'success' => false,
-            'message' => 'لم يتم العثور على الحساب'
-            ]);
-        }
-                // ✅ توليد كود وإعادة استخدام نفس حقول التفعيل
-        $code = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
-
-        $user->update([
-        'verification_code' => $code,
-        'verification_expires_at' => now()->addMinutes(30)
-        ]);
-
-
-            if($user){
-                $whatsapp=$this->sendVerificationCode($user , $code);
-
-                if ($whatsapp) {
-                    return response()->json([
-                        'success' => true,
-                        'message'=> 'تم ارسال رابط التفعيل',
-                        'data'=>['whatsapp_link'=>$whatsapp]
-                    ]);
-                }else{
-                    return response()->json([
-                        'success'=>true,
-                        'message'=>'تم ارسال رمز اعادة التعيين لبريدك الالكتروني'
-                    ]);
-                }
-            }
-            return response()->json([
-            'message'=>'حدث خطا ما']);
-        }
-
-
-    // إعادة تعيين كلمة المرور
-    public function resetPassword(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-            'login' => 'required|string',
-            'code' => 'required|string|size:6',
-            'password' => 'required|string|min:8|confirmed'
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'errors' => $validator->errors()
-            ], 422);
-        }
-
-        $result = $this->authService->confirmPasswordReset(
-            $request->login,
-            $request->code,
-            $request->password
-        );
-
-        return response()->json($result, $result['success'] ? 200 : 400);
+            'errors' => $validator->errors()
+        ], 422);
     }
 
-    // ========== دوال مساعدة ==========
-    // إرسال كود التفعيل (بريد أو SMS)
+    $user = filter_var($request->login, FILTER_VALIDATE_EMAIL)
+        ? User::where('email', $request->login)->first()
+        : User::where('phone', $request->login)->first();
 
-    private function sendVerificationCode(User $user, string $code)
-    {
+    if (!$user) {
+        return response()->json([
+            'success' => false,
+            'message' => 'المستخدم غير موجود'
+        ], 404);
+    }
+    if($user->status !=='unverified') {
 
-    //  إذا بريد حقيقي → أرسل إيميل
+    return response()->json([
+        'success'=>false,
+        'message' => 'لا يمكن ارسال الرمز لهذا الحساب']);
+    }
+
+    if ($user->isVerified()) {
+        return response()->json([
+            'success' => false,
+            'message' => 'الحساب مفعل مسبقاً'
+        ], 400);
+    }
+
+    $code = $user->generateVerificationCode();
+
+    $whatsappLink = $this->sendVerificationCode($user, $code);
+
+    $response = [];
+
+    if ($whatsappLink) {
+        $response['whatsapp_link'] = $whatsappLink;
+        $message = 'تم إنشاء رابط واتساب لإرسال رمز التحقق.';
+    } else {
+        $message = 'تم إرسال رمز التحقق إلى بريدك الإلكتروني.';
+    }
+
+    return response()->json([
+        'success' => true,
+        'message' => $message,
+        'data' => $response
+    ]);
+}
+public function profile(Request $request)
+{
+    $user = $request->user();
+
+    $user->load([
+        'teacher',
+        'student.guardians',
+        'guardian.students',
+        'supervisor'
+    ]);
+
+    return response()->json([
+        'success' => true,
+        'data' => $this->authService->formatUser($user)
+    ]);
+}
+private function sendVerificationCode(User $user, string $code): ?string
+{
     if ($user->email) {
+
         $this->sendEmailCode($user, $code);
-        return null; // لا حاجة لرابط واتساب
+
+        return null;
     }
 
-    //  إذا رقم → أرجع رابط واتساب
     if ($user->phone) {
+
         return $this->sendSmsCode($user, $code);
+
     }
 
     return null;
-    }
+}
+private function sendEmailCode(User $user, string $code): void
+{
+    $message =
 
-    private function sendEmailCode(User $user, string $code): void
-    {
-        $name = $user->isStudent() ? $user->student->student_name :
-        ($user->isTeacher() ? $user->teacher->teacher_name :
-        ($user->isGuardian() ? $user->guardian->guardian_name : 'مستخدم'));
+"مرحباً {$user->user_name}
 
-        $message = "مرحباً {$name}!\n\n";
-        $message .= "كود التفعيل: {$code}\n\n";
-        $message .= "صالح لمدة 30 دقيقة.\n\n";
-        $message .= "نظام إدارة المدرسة";
+كود التحقق الخاص بك هو:
 
-        Mail::raw($message, function ($mail) use ($user) {
-            $mail->to($user->email)->subject('كود التفعيل ');
-        });
-    }
+{$code}
 
-    private function sendSmsCode(User $user, string $code): string
-    {
-        // رابط واتساب مجاني
-        return  "https://wa.me/{$user->phone}?text=" . urlencode("كود التفعيل: {$code}");
+صلاحية الكود 30 دقيقة.
 
-    }
+نظام إدارة المدرسة.";
 
+    Mail::raw($message, function ($mail) use ($user) {
+
+        $mail->to($user->email)
+             ->subject('رمز التحقق');
+
+    });
+}
+private function sendSmsCode(User $user, string $code): string
+{
+    return "https://wa.me/{$user->phone}?text=" .
+        urlencode("رمز التحقق الخاص بك هو: {$code}");
+}
 }

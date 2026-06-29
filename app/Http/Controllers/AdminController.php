@@ -1,9 +1,9 @@
 <?php
-
-
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\Guardian;
+use App\Models\Supervisor;
 use App\Models\User;
 use App\Models\Teacher;
 use App\Models\Student;
@@ -14,269 +14,352 @@ use Illuminate\Support\Facades\Mail;
 class AdminController extends Controller
 {
 
-    // عرض طلبات التسجيل المعلقة
-    public function pendingRegistrations()
-    {
-        $pendingStudents = User::where('role', 'student')
-            ->where('is_active', false)
-            ->whereNotNull('email_verified_at')
-            ->with('student')
-            ->latest()
-            ->get()
-            ->map(function ($user) {
-                return [
-                    'user_id' => $user->id,
-                    'email' => $user->email,
-                    'phone' => $user->phone,
-                    'registered_at' => $user->created_at->format('Y-m-d H:i'),
-                    'student_details' => [
-                        'student_id' => $user->student->student_id ?? null,
-                        'full_name'=>$user->student->student_name,
-                        'grade' => $user->student->grade ?? null,
-                        'education_level' => $user->student->education_level ?? null,
-                        'birth_date' => $user->student->birth_date?->format('Y-m-d'),
-                        'father_name' => $user->student->father_name ?? null,
-                        'mother_name' => $user->student->mother_name ?? null
-                    ]
-                ];
-            });
+// عرض طلبات التسجيل المعلقة
+public function pendingStudents()
+{
+    $students = User::where('role', 'student')
+        ->where('status', 'pending')
+        ->with('student')
+        ->latest()
+        ->get()
+        ->map(function ($user) {
+            return [
+                'user_id' => $user->id,
+                'user_name' => $user->user_name,
+                'email' => $user->email,
+                'phone' => $user->phone,
+                'gender' => $user->gender,
+                'birth_date' => $user->birth_date?->format('Y-m-d'),
+                'registered_at' => $user->created_at->format('Y-m-d H:i'),
 
-        $pendingTeachers = User::where('role', 'teacher')
-            ->where('is_active', false)
-            ->whereNotNull('email_verified_at')
-            ->with('teacher')
-            ->latest()
-            ->get()
-            ->map(function ($user) {
-                return [
-                    'user_id' => $user->id,
-                    'email' => $user->email,
-                    'phone' => $user->phone,
-                    'registered_at' => $user->created_at->format('Y-m-d H:i'),
-                    'teacher_details' => [
-                        'teacher_id' => $user->teacher->teacher_id ?? null,
-                        'full_name'=>$user->teacher->teacher_name,
-                        'specialization' => $user->teacher->specialization ?? null,
-                        'education_level' => $user->teacher->education_level ?? null,
-                        'grade'=>$user->teacher->grade ?? null
-                    ]
-                ];
-            });
-
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'students' => $pendingStudents,
-                'teachers' => $pendingTeachers,
-                'total_pending' => $pendingStudents->count() + $pendingTeachers->count()
-            ]
-        ]);
-    }
-
-    // الموافقة على مستخدم
-    public function approveUser($userId)
-    {
-    $user = User::find($userId);
-
-    if(!$user) {
-        return response()->json([
-            'success' => false,
-            'message' => 'لم يتم العثور على بيانات المستخدم'
-        ], 404);
-    }
-
-    //  هل قام المستخدم بتفعيل بريده الإلكتروني
-    elseif (!$user->isVerified()) {
-        return response()->json([
-            'success' => false,
-            'message' => 'لا يمكن الموافقة على المستخدم قبل تفعيل حسابه'
-        ], 400);
-    }
-
-    // هل المستخدم مفعل مسبقاً؟
-    elseif ($user->is_active) {
-        return response()->json([
-            'success' => false,
-            'message' => 'المستخدم مفعل مسبقاً'
-        ], 400);
-    }
-
-    if ($user->isStudent() && $user->student) {
-        $student = $user->student;
-        $grade = $student->grade; // الصف الدراسي (1, 2, 3, ...)
-
-        // ✅ إنشاء رقم مدرسي حسب الصف
-        try {
-            $studentNumber = Student::getNextStudentNumberForGrade($grade);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => $e->getMessage()
-            ], 400);
-        }
-    }
-
-    // تفعيل المستخدم
-    $user->update(['is_active' => true]);
-
-    // تحديث حالة الملف الشخصي
-    if ($user->isTeacher() && $user->teacher) {
-        $user->teacher->update(['status' => 'active']);
-    } elseif ($user->isStudent() && $user->student) {
-        $user->student->update(['status' => 'active', 'student_number' => $studentNumber]);
-    }
-
-    // إرسال إيميل تفعيل
-    $this->sendApprovalEmail($user);
+                'student_details' => [
+                    'student_id' => $user->student?->id,
+                    'student_number' => $user->student?->student_number,
+                    'father_name' => $user->student?->father_name,
+                    'mother_name' => $user->student?->mother_name,
+                    'education_level' => $user->student?->education_level,
+                    'school_class' => $user->student?->school_class,
+                    'enrollment_date' => $user->student?->enrollment_date?->format('Y-m-d'),
+                ]
+            ];
+        });
 
     return response()->json([
         'success' => true,
-        'message' => 'تمت الموافقة على المستخدم بنجاح'
+        'data' => $students
     ]);
-    }
+}
 
+public function pendingTeachers()
+{
+    $teachers = User::where('role', 'teacher')
+        ->where('status', 'pending')
+        ->with('teacher')
+        ->latest()
+        ->get()
+        ->map(function ($user) {
+            return [
+                'user_id' => $user->id,
+                'user_name' => $user->user_name,
+                'email' => $user->email,
+                'phone' => $user->phone,
+                'gender' => $user->gender,
+                'birth_date' => $user->birth_date?->format('Y-m-d'),
+                'registered_at' => $user->created_at->format('Y-m-d H:i'),
 
+                'teacher_details' => [
+                    'teacher_id' => $user->teacher?->id,
+                    'education_level' => $user->teacher?->education_level,
+                    'school_class' => $user->teacher?->school_class,
+                    'specialization' => $user->teacher?->specialization,
+                    'cv' => $user->teacher?->cv,
+                    'legal_document'=>$user->teacher?->legal_document_path
+                ]
+            ];
+        });
 
-    // رفض مستخدم
-    public function rejectUser(Request $request, $userId)
-    {
-        $user = User::find($userId);
-        if(!$user)
-        {
-            return response()->json([
-            'success' => false,
-            'message' => 'لم يتم العثور على المستخدم'
-            ]);
-        }
-        if ($user->is_active) {
-            return response()->json([
-                'success' => false,
-                'message' => 'لا يمكن رفض مستخدم مفعل'
-            ], 400);
-        }
+    return response()->json([
+        'success' => true,
+        'data' => $teachers
+    ]);
+}
 
-        if($request->reason){
-            $reason = $request->reason;
-        }else{
-            $reason='لا يوجد سبب';
-        }
+public function pendingSupervisors()
+{
+    $supervisors = User::where('role', 'supervisor')
+        ->where('status', 'pending')
+        ->with('supervisor')
+        ->latest()
+        ->get()
+        ->map(function ($user) {
+            return [
+                'user_id' => $user->id,
+                'user_name' => $user->user_name,
+                'email' => $user->email,
+                'phone' => $user->phone,
+                'gender' => $user->gender,
+                'birth_date' => $user->birth_date?->format('Y-m-d'),
+                'registered_at' => $user->created_at->format('Y-m-d H:i'),
 
-        // حفظ البريد والاسم قبل الحذف
-        $email = $user->email;
-        $name = '';
+                'supervisor_details' => [
+                    'supervisor_id' => $user->supervisor?->id,
+                    'specialization' => $user->supervisor?->specialization,
+                    'bio' => $user->supervisor?->bio,
+                    'cv_file'=>$user->supervisor?->cv_file
+                ]
+            ];
+        });
 
-        // حذف الملف الشخصي
-        if ($user->teacher) {
-            $name=$user->teacher->teacher_name;
-            $user->teacher->update(['status'=>'rejected']);
-            $user->update(['is_active'=>false]);
-        } elseif ($user->student) {
-            $name=$user->student->student_name;
-            $user->student->update(['status'=>'rejected']);
-            $user->update(['is_active'=>false]);
-        }elseif($user->guardian){
-            $name=$user->guardian->guardian_name;
-            $user->guardian->update(['status'=>'rejected']);
-            $user->update(['is_active'=>false]);
-        }
+    return response()->json([
+        'success' => true,
+        'data' => $supervisors
+    ]);
+}
+public function pendingGuardians()
+{
+    $guardians = User::where('role', 'guardian')
+        ->where('status', 'pending')
+        ->with(['guardian.students'])
+        ->latest()
+        ->get()
+        ->map(function ($user) {
 
+            return [
+                'user_id' => $user->id,
+                'user_name' => $user->user_name,
+                'email' => $user->email,
+                'phone' => $user->phone,
+                'gender' => $user->gender,
+                'birth_date' => $user->birth_date?->format('Y-m-d'),
+                'registered_at' => $user->created_at->format('Y-m-d H:i'),
 
-        // إرسال إيميل رفض
-        $this->sendRejectionEmail($email, $name, $reason);
+                'guardian_details' => [
+                    'guardian_id' => $user->guardian?->id,
+                    'relationship' => $user->guardian?->relationship,
+                    'number_of_children' => $user->guardian?->number_of_children,
 
-        return response()->json([
-            'success' => true,
-            'message' => 'تم رفض المستخدم بنجاح'
-        ]);
-    }
+                    'linked_students' => $user->guardian?->students->map(function ($student) {
+                        return [
+                            'student_id' => $student->id,
+                            'student_number' => $student->student_number,
+                            'school_class' => $student->school_class,
+                            'father_name' => $student->father_name,
+                            'mother_name' => $student->mother_name,
+                        ];
+                    })->values()
+                ]
+            ];
+        });
 
-
-    // عرض تفاصيل مستخدم
-    public function userDetails($userId)
-    {
-
-    $user = User::with(['teacher', 'student', 'student.guardians'])
-        ->findOrFail($userId);
+    return response()->json([
+        'success' => true,
+        'data' => $guardians
+    ]);
+}
+    // الموافقة على مستخدم
+   public function approveUser($userId)
+   {
+    $user = User::with(['teacher','student', 'guardian','supervisor'])->find($userId);
 
     if (!$user) {
         return response()->json([
             'success' => false,
-            'message' => 'لم يتم العثور على المستخدم'
+            'message' => 'المستخدم غير موجود'
+        ],404);
+    }
+
+    if ($user->status === 'active') {
+        return response()->json([
+            'success' => false,
+            'message' => 'الحساب مفعل مسبقاً'
+        ],400);
+    }
+
+    if (!$user->isVerified()) {
+        return response()->json([
+            'success' => false,
+            'message' => 'الحساب غير مفعل من قبل المستخدم'
+        ],400);
+    }
+
+
+
+    if ($user->isStudent()) {
+
+        try {
+
+            $studentNumber = User::getNextStudentNumberForGrade(
+                $user->student->school_class
+            );
+
+        } catch (\Exception $e) {
+
+            return response()->json([
+                'success'=>false,
+                'message'=>$e->getMessage()
+            ],400);
+
+        }
+
+        $user->student->update([
+            'student_number'=>$studentNumber
+        ]);
+    }
+    if($user->isGuardian()){
+        $guardian=$user->guardian;
+        $studentVerificationNumber=$guardian->verification_student_number;
+        $student=Student::where('student_number',$studentVerificationNumber)->first();
+        //  ربط الطالب إذا لم يكن مرتبط مسبقاً
+        if (!$guardian->students()->where('student_id', $student->id)->exists()) {
+            $guardian->students()->attach($student->id);
+        }
+    }
+
+    $user->update([
+        'status'=>'active'
+    ]);
+
+    if ($user->email) {
+        $this->sendApprovalEmail($user);
+    }
+
+    return response()->json([
+        'success'=>true,
+        'message'=>'تمت الموافقة على المستخدم بنجاح'
+    ]);
+    }
+   public function rejectUser(Request $request, $userId)
+   {
+    $user = User::with(['student','teacher','guardian','supervisor'])->find($userId);
+
+    if (!$user) {
+        return response()->json([
+            'success' => false,
+            'message' => 'المستخدم غير موجود'
+        ], 404);
+    }
+
+    if ($user->status === 'active') {
+        return response()->json([
+            'success' => false,
+            'message' => 'لا يمكن رفض حساب مفعل'
+        ], 400);
+    }
+
+    if ($user->status === 'rejected') {
+        return response()->json([
+            'success' => false,
+            'message' => 'لا يمكن رفض حساب مرفوض مفعل'
+        ], 400);
+    }
+
+
+    $reason = $request->reason ?? 'لا يوجد سبب';
+
+    $name = $user->user_name;
+    $email = $user->email;
+
+
+    $user->update([
+        'status' => 'rejected'
+    ]);
+
+    if ($email) {
+        $this->sendRejectionEmail($email, $name, $reason);
+    }
+
+    return response()->json([
+        'success' => true,
+        'message' => 'تم رفض المستخدم بنجاح'
+    ]);
+}
+
+
+    // عرض تفاصيل مستخدم
+public function userDetails($userId)
+{
+    $user = User::with([
+        'student.guardians',
+        'teacher',
+        'guardian.students',
+        'supervisor'
+    ])->find($userId);
+
+    if (!$user) {
+        return response()->json([
+            'success' => false,
+            'message' => 'المستخدم غير موجود'
         ], 404);
     }
 
     $details = [
         'user_id' => $user->id,
+        'user_name' => $user->user_name,
         'email' => $user->email,
-        'role' => $user->role,
         'phone' => $user->phone,
-        'is_active' => $user->is_active,
-        'registered_at' => $user->created_at->format('Y-m-d H:i'),
-        'last_login_at' => $user->last_login_at?->format('Y-m-d H:i'),
+        'gender' => $user->gender,
+        'birth_date' => $user->birth_date,
+        'role' => $user->role,
+        'status' => $user->status,
+        'created_at' => $user->created_at->format('Y-m-d H:i'),
     ];
 
-    if ($user->isAdmin()) {
-        $details['admin_details'] = [
-            'type' => 'مدير النظام',
-            'access_level' => 'كامل',
-            'can_manage' => ['teachers', 'students', 'system']
+    // Student
+    if ($user->isStudent() && $user->student) {
+        $details['student_details'] = [
+            'student_id' => $user->student->id,
+            'student_number' => $user->student->student_number,
+            'father_name' => $user->student->father_name,
+            'mother_name' => $user->student->mother_name,
+            'education_level' => $user->student->education_level,
+            'school_class' => $user->student->school_class,
+            'enrollment_date' => $user->student->enrollment_date,
+            'guardians' => $user->student->guardians->map(function ($g) {
+                return [
+                    'guardian_id' => $g->id,
+                    'name' => $g->user->user_name,
+                    'relationship' => $g->relationship
+                ];
+            })
         ];
-        return response()->json([
-            'success' => true,
-            'data' => $details
-        ]);
     }
 
+    // Teacher
     if ($user->isTeacher() && $user->teacher) {
         $details['teacher_details'] = [
             'teacher_id' => $user->teacher->id,
-            'full_name' => $user->teacher->teacher_name,
-            'specialization' => $user->teacher->specialization,
             'education_level' => $user->teacher->education_level,
-            'status' => $user->teacher->status,
+            'school_class' => $user->teacher->school_class,
+            'specialization' => $user->teacher->specialization,
+            'cv' => $user->teacher->cv,
+            'legal_document' => $user->teacher->legal_document_path,
         ];
-    } elseif ($user->isStudent() && $user->student) {
-        $details['student_details'] = [
-            'student_id' => $user->student->id,
-            'full_name' => $user->student->student_name,
-            'grade' => $user->student->grade,
-            'education_level' => $user->student->education_level,
-            'status' => $user->student->status,
-            'father_name' => $user->student->father_name,
-            'mother_name' => $user->student->mother_name,
-            'birth_date' => $user->student->birth_date ,
-            'gender' => $user->student->gender,
-            'enrollment_date' => $user->student->enrollment_date,
-        ];
+    }
 
-        //  إضافة أولياء الأمور للطالب
-        if ($user->student->guardians()->exists()) {
-            $details['student_details']['guardians'] = $user->student->guardians->map(function ($guardian) {
+    // Guardian
+    if ($user->isGuardian() && $user->guardian) {
+        $details['guardian_details'] = [
+            'guardian_id' => $user->guardian->id,
+            'relationship' => $user->guardian->relationship,
+            'number_of_children' => $user->guardian->number_of_children,
+            'children' => $user->guardian->students->map(function ($s) {
                 return [
-                    'guardian_id' => $guardian->id,
-                    'guardian_name' => $guardian->guardian_name,
-                    'relationship' => $guardian->pivot->relationship ?? 'غير محدد',
-                    'is_primary' => (bool)($guardian->pivot->is_primary ?? false),
-                    'status' => $guardian->status,
-                    'number_of_children' => $guardian->number_of_children,
+                    'student_id' => $s->id,
+                    'student_number' => $s->student_number,
+                    'name' => $s->user->user_name,
+                    'class' => $s->school_class
                 ];
-            });
+            })
+        ];
+    }
 
-            //  إضافة ولي الأمر الأساسي كحقل منفصل
-            $primaryGuardian = $user->student->guardians()
-                ->wherePivot('is_primary', true)
-                ->first();
-
-            if ($primaryGuardian) {
-                $details['student_details']['primary_guardian'] = [
-                    'guardian_id' => $primaryGuardian->id,
-                    'guardian_name' => $primaryGuardian->guardian_name,
-                    'relationship' => $primaryGuardian->pivot->relationship,
-                ];
-            }
-        } else {
-            $details['student_details']['guardians'] = []; // لا يوجد أولياء أمر
-        }
+    // Supervisor
+    if ($user->isSupervisor() && $user->supervisor) {
+        $details['supervisor_details'] = [
+            'supervisor_id' => $user->supervisor->id,
+            'specialization' => $user->supervisor->specialization,
+            'bio' => $user->supervisor->bio,
+        ];
     }
 
     return response()->json([
@@ -284,7 +367,6 @@ class AdminController extends Controller
         'data' => $details
     ]);
 }
-
     // إحصائيات سريعة للمدير
     public function dashboardStats()
     {
@@ -292,79 +374,107 @@ class AdminController extends Controller
             'success' => true,
             'data' => [
                 'total_students' => Student::count(),
-                'active_students' => Student::where('status', 'active')->count(),
+                'active_students' => User::whereRole('student')->where('status', 'active')->count(),
                 'total_teachers' => Teacher::count(),
-                'active_teachers' => Teacher::where('status', 'active')->count(),
-                'pending_registrations' => User::where('is_active', false)
-                    ->whereIn('role', ['student', 'teacher'])
+                'active_teachers' => User::whereRole('teacher')->where('status', 'active')->count(),
+                'total_supervisors' => Supervisor::count(),
+                'active_supervisors' =>User::whereRole('supervisor')->where('status', 'active')->count(),
+                'total_guardians' => Guardian::count(),
+                'active_guardians' => User::whereRole('guardian')->where('status', 'active')->count(),
+                'pending_registrations' => User::where('status', 'pending')
+                    ->whereIn('role', ['student', 'teacher','supervisor','guardian'])
                     ->count(),
-                'pending_students' => User::where('role', 'student')->where('is_active', false)->count(),
-                'pending_teachers' => User::where('role', 'teacher')->where('is_active', false)->count(),
+
             ]
         ]);
     }
-
-
-
     private function sendApprovalEmail(User $user): void
     {
         $roleArabic = match($user->role) {
-        'teacher' => 'معلم',
         'student' => 'طالب',
+        'teacher' => 'معلم',
+        'guardian' => 'ولي أمر',
+        'supervisor'=>'موجه',
         default => 'مستخدم'
         };
 
-        $message = "مرحباً {$user->full_name}!\n\n";
-        $message .= "🎉 تمت الموافقة على طلب تسجيلك {$roleArabic} في نظام إدارة المدرسة.\n\n";
+        $message = "مرحباً {$user->user_name}!\n\n";
+        $message .= "تمت الموافقة على تسجيلك كـ {$roleArabic} في النظام.\n\n";
 
-        if ($user->isStudent() ) {
-        $message .= "📚 رقمك المدرسي هو: **{$user->student->studentNumber}**\n";
-        $message .= "يمكنك استخدام هذا الرقم للتعريف بنفسك داخل المدرسة.\n\n";
+        if ($user->isStudent() && $user->student) {
+        $message .= "رقم الطالب: {$user->student->student_number}\n";
+        $message .= "الصف: {$user->student->school_class}\n\n";
         }
 
-        $message .= "✅ بريدك الإلكتروني مفعل.\n";
-        $message .= "✅ تمت الموافقة على طلبك من قبل الإدارة.\n\n";
-        $message .= "يمكنك الآن تسجيل الدخول إلى حسابك والبدء في استخدام النظام.\n\n";
-        $message .= "نتمنى لك التوفيق!\n\n";
-        $message .= "--\nإدارة المدرسة";
+        $message .= "يمكنك الآن تسجيل الدخول واستخدام النظام.\n\n";
+        $message .= "شكراً لك.";
 
         Mail::raw($message, function ($mail) use ($user) {
-            $mail->to($user->email)
-            ->subject('🎉 تم تفعيل حسابك - نظام إدارة المدرسة');
+        $mail->to($user->email)
+            ->subject('تم تفعيل حسابك');
         });
     }
 
     private function sendRejectionEmail(string $email, string $name, string $reason): void
     {
-        $message = "مرحباً {$name}!\n\n";
-        $message .= "نأسف لإعلامك بأنه تم رفض طلب تسجيلك في نظام إدارة المدرسة.\n\n";
-        $message .= "سبب الرفض: {$reason}\n\n";
-        $message .= "يمكنك التواصل مع الإدارة لمزيد من المعلومات.\n\n";
-        $message .= "--\nإدارة المدرسة";
+    $message = "مرحباً {$name}!\n\n";
+    $message .= "تم رفض طلب تسجيلك في النظام.\n\n";
+    $message .= "السبب: {$reason}\n\n";
+    $message .= "يمكنك التواصل مع الإدارة لمزيد من التفاصيل.";
 
-        Mail::raw($message, function ($mail) use ($email) {
-            $mail->to($email)
-                 ->subject('بخصوص طلب التسجيل - نظام إدارة المدرسة');
-        });
+    Mail::raw($message, function ($mail) use ($email) {
+        $mail->to($email)
+            ->subject('رفض طلب التسجيل');
+    });
     }
 
     public function listTeachers()
     {
-    $teachers = User::where('role', 'teacher')
-        ->where('is_active', true)
+        $teachers = User::where('role', 'teacher')
+        ->where('status', 'active')
         ->with('teacher')
-        ->get();
+        ->latest()
+        ->get()
+        ->map(function ($user) {
 
-    return response()->json(['success' => true, 'data' => $teachers]);
+            return [
+                'user_id' => $user->id,
+                'user_name' => $user->user_name,
+                'email' => $user->email,
+                'phone' => $user->phone,
+                'school_class' => $user->teacher?->school_class,
+                'specialization' => $user->teacher?->specialization,
+            ];
+        });
+
+        return response()->json([
+        'success' => true,
+        'data' => $teachers
+        ]);
     }
 
     public function listStudents()
     {
         $students = User::where('role', 'student')
-        ->where('is_active', true)
+        ->where('status', 'active')
         ->with('student')
-        ->get();
+        ->latest()
+        ->get()
+        ->map(function ($user) {
 
-        return response()->json(['success' => true, 'data' => $students]);
+            return [
+                'user_id' => $user->id,
+                'user_name' => $user->user_name,
+                'email' => $user->email,
+                'phone' => $user->phone,
+                'school_class' => $user->student?->school_class,
+                'student_number' => $user->student?->student_number,
+            ];
+        });
+
+        return response()->json([
+        'success' => true,
+        'data' => $students
+        ]);
     }
 }

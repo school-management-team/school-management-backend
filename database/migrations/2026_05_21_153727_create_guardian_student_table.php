@@ -13,7 +13,7 @@ return new class extends Migration
             $table->id();
             $table->foreignId('guardian_id')->constrained()->cascadeOnDelete();
             $table->foreignId('student_id')->constrained()->cascadeOnDelete();
-            $table->boolean('is_primary');
+
 
             $table->timestamps();
 

@@ -9,15 +9,16 @@ class CheckActive
 {
     public function handle(Request $request, Closure $next)
     {
-        if (!$request->user()) {
+        $user=$request->user();
+        if (!$user) {
             return response()->json([
                 'success' => false,
                 'message' => 'يجب تسجيل الدخول أولاً'
             ], 401);
         }
 
-        if (!$request->user()->is_active) {
-            $request->user()->currentAccessToken()->delete();
+        if ($user->status !== 'active') {
+            $user->currentAccessToken()->delete();
 
             return response()->json([
                 'success' => false,
