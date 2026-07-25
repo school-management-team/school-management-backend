@@ -18,7 +18,7 @@ return new class extends Migration
             $table->text('bio');
             $table->string('cv_file');
 
-            $table->foreignId('user_id')->constrained('users');
+            $table->foreignId('user_id')->unique()->constrained('users');
 
             $table->softDeletes();
             $table->timestamps();

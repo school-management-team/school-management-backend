@@ -33,7 +33,6 @@ return new class extends Migration
             $table->integer('failed_attempts')->default(0);
             $table->timestamp('locked_until')->nullable();
             $table->rememberToken();
-            $table->timestamp('remember_expires_at')->nullable();
             $table->timestamps();
             $table->softDeletes();
 

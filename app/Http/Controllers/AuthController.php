@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class AuthController extends Controller
 {
@@ -60,103 +61,49 @@ class AuthController extends Controller
 public function registerStudent(Request $request)
 {
     $validator = Validator::make($request->all(), [
-
         'login' => 'required|string|unique:users,email|unique:users,phone',
-
         'password' => 'required|string|min:8|confirmed',
-
         'user_name' => 'required|string|max:100',
-
         'gender' => 'required|in:male,female',
-
         'birth_date' => 'required|date',
-
         'father_name' => 'required|string|max:100',
-
         'mother_name' => 'required|string|max:100',
-
-        'education_level' => 'required|in:primary,middle,high',
-
-        'school_class' => 'required|string|min:1|max:12',
-
+        'class_id' => 'required|integer|exists:classes,id',
     ]);
 
     if ($validator->fails()) {
-
-        return response()->json([
-            'success' => false,
-            'errors' => $validator->errors()
-        ], 422);
-
+        return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
     }
 
     DB::beginTransaction();
-
     try {
+        $user = $this->authService->createUser($request->all(), 'student');
 
-        // إنشاء المستخدم
-        $user = $this->authService->createUser(
-            $request->all(),
-            'student'
-        );
-
-        // إنشاء بيانات الطالب
         Student::create([
-
             'user_id' => $user->id,
-
             'father_name' => $request->father_name,
-
             'mother_name' => $request->mother_name,
-
-            'education_level' => $request->education_level,
-
-            'school_class' => $request->school_class,
-
+            'class_id' => $request->class_id,
             'enrollment_date' => now(),
-
         ]);
 
-        // إنشاء كود التحقق
         $code = $user->generateVerificationCode();
-
-        // إرسال الكود
         $link = $this->sendVerificationCode($user, $code);
-
         DB::commit();
 
         return response()->json([
-
             'success' => true,
-
             'message' => 'تم إنشاء الحساب بنجاح بانتظار موافقة الادارة.',
-
-            'data' => [
-
-                'user_id' => $user->id,
-
-                'requires_verification' => true,
-
-                'whatsapp_link' => $link
-
-            ]
-
+            'data' => ['user_id' => $user->id, 'requires_verification' => true, 'whatsapp_link' => $link],
         ], 201);
 
     } catch (\Exception $e) {
-
         DB::rollBack();
-
         return response()->json([
-
             'success' => false,
-
             'message' => 'حدث خطأ أثناء التسجيل',
-
-            'error' => config('app.debug') ? $e->getMessage() : null
-
+            'error' => config('app.debug') ? $e->getMessage() : null,
         ], 500);
-
     }
 }
 
@@ -166,109 +113,50 @@ public function registerStudent(Request $request)
 public function registerTeacher(Request $request)
 {
     $validator = Validator::make($request->all(), [
-
         'login' => 'required|string|unique:users,email|unique:users,phone',
-
         'password' => 'required|string|min:8|confirmed',
-
         'user_name' => 'required|string|max:100',
-
         'gender' => 'required|in:male,female',
-
         'birth_date' => 'required|date',
-
-        'education_level' => 'required|in:primary,middle,high',
-
-        'school_class' => 'required|string|min:1|max:12',
-
         'specialization' => 'required|string|max:100',
-
         'cv' => 'required|string|max:5000',
-
         'legal_document_path' => 'required|file|mimes:pdf,jpg,jpeg,png|max:4096',
-
     ]);
 
     if ($validator->fails()) {
-
-        return response()->json([
-            'success' => false,
-            'errors' => $validator->errors()
-        ], 422);
-
+        return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
     }
 
     DB::beginTransaction();
-
     try {
+        $user = $this->authService->createUser($request->all(), 'teacher');
 
-        // إنشاء المستخدم
-        $user = $this->authService->createUser(
-            $request->all(),
-            'teacher'
-        );
+        $documentPath = $request->file('legal_document_path')->store('legal_documents', 'public');
 
-        // رفع الملف
-        $documentPath = $request
-            ->file('legal_document_path')
-            ->store('legal_documents', 'public');
-
-        // إنشاء بيانات المعلم
         Teacher::create([
-
             'user_id' => $user->id,
-
-            'education_level' => $request->education_level,
-
-            'school_class' => $request->school_class,
-
             'specialization' => $request->specialization,
-
             'cv' => $request->cv,
-
             'legal_document_path' => $documentPath,
-
         ]);
 
-        // إرسال كود التحقق
         $code = $user->generateVerificationCode();
-
         $link = $this->sendVerificationCode($user, $code);
-
         DB::commit();
 
         return response()->json([
-
             'success' => true,
-
             'message' => 'تم إنشاء الحساب بنجاح بانتظار موافقة الادارة.',
-
-            'data' => [
-
-                'user_id' => $user->id,
-
-                'requires_verification' => true,
-
-                'whatsapp_link' => $link
-
-            ]
-
+            'data' => ['user_id' => $user->id, 'requires_verification' => true, 'whatsapp_link' => $link],
         ], 201);
 
     } catch (\Exception $e) {
-
         DB::rollBack();
-
         return response()->json([
-
             'success' => false,
-
             'message' => 'حدث خطأ أثناء التسجيل',
-
-            'error' => config('app.debug') ? $e->getMessage() : null
-
+            'error' => config('app.debug') ? $e->getMessage() : null,
         ], 500);
-
     }
 }
 
@@ -414,7 +302,7 @@ public function registerSupervisor(Request $request)
         // رفع الملف
         $cvPath = $request
             ->file('cv_file')
-            ->store('supervisors/cv', 'public');
+            ->store('supervisors/cv', 'local');
 
         // إنشاء بيانات المشرف
         Supervisor::create([
@@ -616,7 +504,7 @@ public function verifyAccount(Request $request)
     }
     if($user->isGuardian()){
         $studentNumber=$user->guardian->verification_student_number;
-        $result=$this->guardianVerificationService->verifyAndLink($user->guardian,$studentNumber);
+        $result=$this->guardianVerificationService->verifyMatch($user->guardian,$studentNumber);
 
         if(!$result['success']){
             return response()->json($result,400);

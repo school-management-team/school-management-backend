@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use DB;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -40,11 +41,7 @@ class User extends Authenticatable
         'locked_until' => 'datetime',
     ];
 
-    /*
-    |--------------------------------------------------------------------------
-    | Relationships
-    |--------------------------------------------------------------------------
-    */
+
 
     public function teacher()
     {
@@ -64,12 +61,6 @@ class User extends Authenticatable
     {
         return $this->hasOne(Supervisor::class);
     }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Roles
-    |--------------------------------------------------------------------------
-    */
 
     public function isTeacher(): bool
     {
@@ -118,11 +109,7 @@ class User extends Authenticatable
         return null;
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | Login Security
-    |--------------------------------------------------------------------------
-    */
+
 
     public function recordFailedAttempt(): void
     {
@@ -160,24 +147,19 @@ class User extends Authenticatable
         return true;
     }
 
+
     public function getLockRemainingMinutes(): int
     {
-        return max(
-            0,
-            now()->diffInMinutes($this->locked_until, false)
-        );
+        if (!$this->locked_until || $this->locked_until->isPast()) {
+        return 0;
+        }
+        return (int) ceil(now()->diffInSeconds($this->locked_until) / 60);
     }
 
     public function getRemainingAttempts(): int
     {
         return max(0, 5 - $this->failed_attempts);
     }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Email Verification
-    |--------------------------------------------------------------------------
-    */
 
     public function generateVerificationCode(): string
     {
@@ -254,18 +236,24 @@ class User extends Authenticatable
 
     //Student Number
 
-    public static function getNextStudentNumberForGrade(string $class): string
+    public static function getNextStudentNumberForGrade(int $gradeOrder): string
     {
-        $ranges = config('school.student_number_ranges');
+    $ranges = config('school.student_number_ranges');
 
-        if (!isset($ranges[$class])) {
-            throw new \Exception("الصف {$class} غير معرف");
-        }
+    if (!isset($ranges[$gradeOrder])) {
+        throw new \Exception("الصف رقم {$gradeOrder} غير معرف بإعدادات الأرقام المدرسية");
+    }
 
-        $start = $ranges[$class]['start'];
-        $end = $ranges[$class]['end'];
-        $lastStudent = Student::where('school_class', $class)
+    $start = $ranges[$gradeOrder]['start'];
+    $end = $ranges[$gradeOrder]['end'];
+
+    return DB::transaction(function () use ($gradeOrder, $start, $end) {
+        $lastStudent = Student::withTrashed()
+            ->whereHas('schoolClass', function ($query) use ($gradeOrder) {
+                $query->where('grade_order', $gradeOrder);
+            })
             ->whereNotNull('student_number')
+            ->lockForUpdate()
             ->orderByDesc('student_number')
             ->first();
 
@@ -280,5 +268,6 @@ class User extends Authenticatable
         }
 
         return (string) $start;
+    });
     }
 }

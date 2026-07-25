@@ -13,11 +13,12 @@ return new class extends Migration
             $table->string('student_number', 5)->nullable()->unique();
             $table->string('father_name');
             $table->string('mother_name');
-            $table->enum('education_level', ['primary', 'middle', 'high']);
-            $table->string('school_class');
+
             $table->date('enrollment_date');
 
-            $table->foreignId('user_id')->constrained('users');
+            $table->foreignId('user_id')->unique()->constrained('users');
+            $table->foreignId('class_id')->constrained('classes');
+            $table->foreignId('section_id')->nullable()->constrained('sections')->nullOnDelete();
 
             $table->timestamps();
             $table->softDeletes();

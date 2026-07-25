@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\CheckActive;
 use App\Http\Middleware\CheckForceLogout;
+use App\Http\Middleware\CheckRegistrationOpen;
 use App\Http\Middleware\CheckRole;
 use App\Http\Middleware\CheckVerified;
 use Illuminate\Foundation\Application;
@@ -21,16 +22,15 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'role'=>CheckRole::class,
             'active'=>CheckActive::class,
-            'force.logout'=>CheckForceLogout::class,
-            'verified'=>CheckVerified::class]);
+            'registration.open' =>CheckRegistrationOpen::class]);
         $middleware->api([
         \Illuminate\Session\Middleware\StartSession::class,
         \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
-    ]);    
+    ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         //
     })->create();
-    
 
-   
+
+

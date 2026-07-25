@@ -8,26 +8,27 @@ use App\Http\Controllers\AdminController;
 // Public Routes
 
 
+// routes/api.php
 Route::prefix('auth')->group(function () {
 
-    // Login
-    Route::post('/login', [AuthController::class, 'login']);
+    Route::middleware('throttle:6,1')->group(function () {
+        Route::post('/login', [AuthController::class, 'login']);
+    });
 
-    // Register
-    Route::post('/register/student', [AuthController::class, 'registerStudent']);
-    Route::post('/register/teacher', [AuthController::class, 'registerTeacher']);
-    Route::post('/register/guardian', [AuthController::class, 'registerGuardian']);
-    Route::post('/register/supervisor', [AuthController::class, 'registerSupervisor']);
+    Route::middleware(['throttle:3,1', 'registration.open'])->group(function () {
+        Route::post('/register/student', [AuthController::class, 'registerStudent']);
+        Route::post('/register/teacher', [AuthController::class, 'registerTeacher']);
+        Route::post('/register/guardian', [AuthController::class, 'registerGuardian']);
+        Route::post('/register/supervisor', [AuthController::class, 'registerSupervisor']);
+        Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+    });
 
-    // Verification
-    Route::post('/verify-account', [AuthController::class, 'verifyAccount']);
-    Route::post('/resend-code', [AuthController::class, 'resendVerificationCode']);
-
-    // Password
-    Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
-    Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+    Route::middleware('throttle:5,1')->group(function () {
+        Route::post('/verify-account', [AuthController::class, 'verifyAccount']);
+        Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+        Route::post('/resend-code', [AuthController::class, 'resendVerificationCode']);
+    });
 });
-
 // Authenticated Users
 
 Route::middleware([
@@ -40,6 +41,11 @@ Route::middleware([
     Route::post('/change-password', [AuthController::class, 'changePassword']);
 
     Route::get('/profile', [AuthController::class, 'profile']);
+});
+
+
+Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/teachers/{teacher}/document', [AdminController::class, 'downloadTeacherDocument']);
 });
 
 
@@ -71,5 +77,9 @@ Route::middleware([
     Route::get('/teachers', [AdminController::class, 'listTeachers']);
 
     Route::get('/students', [AdminController::class, 'listStudents']);
+
+    Route::post('/system/lock', [AdminController::class, 'lockRegistration']);
+    Route::post('/system/unlock', [AdminController::class, 'unlockRegistration']);
+    Route::get('/system/status', [AdminController::class, 'systemStatus']);
 
 });

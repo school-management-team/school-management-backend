@@ -14,7 +14,7 @@ class GuardianVerificationService
        تفعيل الحساب لأول مرة
       أو إضافة طالب جديد من داخل الحساب
      */
-    public function verifyAndLink(Guardian $guardian, string $studentNumber): array
+    public function verifyMatch(Guardian $guardian, string $studentNumber): array
     {
         //  البحث عن الطالب
         $student = Student::where('student_number', $studentNumber)->first();
@@ -60,7 +60,7 @@ class GuardianVerificationService
 
     public function addStudentToGuardian(Guardian $guardian, string $studentNumber)
     {
-        $result= $this->verifyAndLink($guardian, $studentNumber);
+        $result= $this->verifyMatch($guardian, $studentNumber);
 
         if(!$result['success']){
             return $result;
@@ -71,6 +71,12 @@ class GuardianVerificationService
         if (!$guardian->students()->where('student_id', $student->id)->exists()) {
             $guardian->students()->attach($student->id);
         }
+
+        return [
+        'success' => true,
+        'message' => 'تم ربط الطالب بنجاح',
+        'student' => $student,
+        ];
     }
 
     // مقارنة بسيطة للأسماء (تطبيع خفيف)

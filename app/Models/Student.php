@@ -4,8 +4,11 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
+// Student.php — كامل بعد التعديل
 class Student extends Model
 {
     use HasFactory, SoftDeletes;
@@ -14,24 +17,19 @@ class Student extends Model
         'student_number',
         'father_name',
         'mother_name',
-        'education_level',
-        'school_class',
         'enrollment_date',
+        'class_id',
+        'section_id',
         'user_id',
     ];
 
-    protected $casts = [
-        'enrollment_date' => 'date',
-    ];
+    protected $casts = ['enrollment_date' => 'date'];
 
-    public function user()
+    public function user(): BelongsTo { return $this->belongsTo(User::class); }
+    public function guardians(): BelongsToMany
     {
-        return $this->belongsTo(User::class);
+        return $this->belongsToMany(Guardian::class, 'guardian_student')->withTimestamps();
     }
-
-    public function guardians()
-    {
-        return $this->belongsToMany(Guardian::class, 'guardian_student')
-            ->withTimestamps();
-    }
+    public function schoolClass(): BelongsTo { return $this->belongsTo(SchoolClass::class, 'class_id'); }
+    public function section(): BelongsTo { return $this->belongsTo(Section::class); }
 }

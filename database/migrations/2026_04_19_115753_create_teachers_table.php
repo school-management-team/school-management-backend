@@ -12,16 +12,15 @@ return new class extends Migration
         Schema::create('teachers', function (Blueprint $table) {
             $table->id();
 
-            // المعلومات المهنية
-            $table->enum('education_level', ['primary', 'middle','high']);
-            $table->string('school_class');
+
             $table->string('specialization');
 
             // المستندات
             $table->text('cv');
             $table->string('legal_document_path');
 
-            $table->foreignId('user_id')->constrained('users');
+            $table->foreignId('user_id')->unique()->constrained('users');
+
             $table->timestamps();
             $table->softDeletes();
 

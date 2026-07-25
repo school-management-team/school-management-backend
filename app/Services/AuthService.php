@@ -175,52 +175,38 @@ public function confirmPasswordReset(
 }
 public function formatUser(User $user): array
 {
-    $user->load([
-        'student',
-        'teacher',
-        'guardian.students',
-        'supervisor'
-    ]);
+    $user->load(['student.schoolClass.stage', 'student.section', 'teacher', 'guardian.students', 'supervisor']);
 
     $data = [
-
-        'id'=>$user->id,
-        'user_name'=>$user->user_name,
-        'email'=>$user->email,
-        'phone'=>$user->phone,
-        'role'=>$user->role,
-        'status'=>$user->status,
-        'gender'=>$user->gender,
-        'birth_date'=>$user->birth_date,
-        'email_verified'=>$user->isVerified()
+        'id' => $user->id,
+        'user_name' => $user->user_name,
+        'email' => $user->email,
+        'phone' => $user->phone,
+        'role' => $user->role,
+        'status' => $user->status,
+        'gender' => $user->gender,
+        'birth_date' => $user->birth_date,
+        'email_verified' => $user->isVerified(),
     ];
 
-    if($user->isAdmin())
-    {
-        return $data;
-    }
+    if ($user->isAdmin()) return $data;
 
-    if($user->isStudent())
-    {
-        $data['profile']=[
-
-            'student_number'=>$user->student?->student_number,
-            'father_name'=>$user->student?->father_name,
-            'mother_name'=>$user->student?->mother_name,
-            'education_level'=>$user->student?->education_level,
-            'school_class'=>$user->student?->school_class,
-            'enrollment_date'=>$user->student?->enrollment_date,
+    if ($user->isStudent()) {
+        $data['profile'] = [
+            'student_number' => $user->student?->student_number,
+            'father_name' => $user->student?->father_name,
+            'mother_name' => $user->student?->mother_name,
+            'class' => $user->student?->schoolClass?->name,
+            'stage' => $user->student?->schoolClass?->stage?->name,
+            'section' => $user->student?->section?->name,
+            'enrollment_date' => $user->student?->enrollment_date,
         ];
     }
 
-    if($user->isTeacher())
-    {
-        $data['profile']=[
-
-            'education_level'=>$user->teacher?->education_level,
-            'school_class'=>$user->teacher?->school_class,
-            'specialization'=>$user->teacher?->specialization,
-            'cv'=>$user->teacher?->cv,
+    if ($user->isTeacher()) {
+        $data['profile'] = [
+            'specialization' => $user->teacher?->specialization,
+            'cv' => $user->teacher?->cv,
         ];
     }
 
