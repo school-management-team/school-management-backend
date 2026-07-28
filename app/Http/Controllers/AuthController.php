@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\SchoolClass;
 use App\Models\Supervisor;
 use App\Models\User;
 use App\Models\Student;
@@ -10,11 +11,9 @@ use App\Models\Guardian;
 use App\Services\AuthService;
 use App\Services\GuardianVerificationService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\Rule;
 
 class AuthController extends Controller
 {
@@ -74,7 +73,22 @@ public function registerStudent(Request $request)
     if ($validator->fails()) {
         return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
     }
+        $class = SchoolClass::find($request->class_id);
+    if (!$class) {
+        return response()->json([
+            'success' => false,
+            'message' => 'الصف المحدد غير موجود'
+        ], 422);
+    }
 
+    // التحقق من أن الصف له نطاق أرقام في الـ config
+    $ranges = config('school.student_number_ranges');
+    if (!isset($ranges[$class->grade_order])) {
+        return response()->json([
+            'success' => false,
+            'message' => "الصف {$class->name} غير معرف في نظام الترقيم، يرجى التواصل مع الإدارة"
+        ], 422);
+    }
     DB::beginTransaction();
     try {
         $user = $this->authService->createUser($request->all(), 'student');

@@ -12,12 +12,12 @@ class CheckRegistrationOpen
 
     public function handle(Request $request, Closure $next): Response
     {
-        $setting = SystemSetting::current();
+        $setting = SystemSetting::latest()->first();
 
         if ($setting->registration_locked) {
             return response()->json([
                 'success' => false,
-                'message' => $setting->lock_reason ?: 'التسجيل مغلق حاليًا، يرجى المحاولة لاحقًا',
+                'message' =>  'التسجيل مغلق حاليًا '.$setting->lock_reason .'، يرجى المحاولة لاحقًا',
             ], 503);
         }
 

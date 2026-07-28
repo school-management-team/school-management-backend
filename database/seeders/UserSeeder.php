@@ -11,12 +11,8 @@ class UserSeeder extends Seeder
 {
     public function run(): void
     {
-        /*
-        |--------------------------------------------------------------------------
-        | Admin
-        |--------------------------------------------------------------------------
-        */
 
+        // Admin
         User::create([
             'user_name' => 'Administrator',
             'email' => 'admin1@school.com',
@@ -29,11 +25,8 @@ class UserSeeder extends Seeder
             'password_changed_at' => now(),
         ]);
 
-        /*
-        |--------------------------------------------------------------------------
-        | Teachers
-        |--------------------------------------------------------------------------
-        */
+
+        // Teachers
 
         User::factory()
             ->count(5)
@@ -51,43 +44,30 @@ class UserSeeder extends Seeder
 
             });
 
-        /*
-        |--------------------------------------------------------------------------
-        | Students
-        |--------------------------------------------------------------------------
-        */
+    //Students
+      User::factory()
+    ->count(10)
+    ->state(['role' => 'student'])
+    ->create()
+    ->each(function ($user) {
 
-        User::factory()
-            ->count(10)
-            ->state([
-                'role' => 'student',
-            ])
-            ->create()
-            ->each(function ($user) {
+        $student = $user->student()->create(
+            Student::factory()->make()->toArray()
+        );
 
-                $student = $user->student()->create(
-                    \App\Models\Student::factory()
-                        ->make()
-                        ->toArray()
-                );
+        // توليد رقم مدرسي حقيقي عبر نفس دالة approveUser، مو رقم عشوائي
+        $gradeOrder = $student->schoolClass->grade_order;
+        $number = User::getNextStudentNumberForGrade($gradeOrder);
+        $student->update(['student_number' => $number]);
 
-                $student->update([
-                    'student_number' => str_pad(
-                        (string) random_int(1, 99999),
-                        5,
-                        '0',
-                        STR_PAD_LEFT
-                    )
-                ]);
+        // توزيع عشوائي على شعبة ضمن نفس صفه — لأجل اختبار الحضور والعلامات فورًا
+        $section = $student->schoolClass->sections()->inRandomOrder()->first();
+        if ($section) {
+            $student->update(['section_id' => $section->id]);
+        }
+    });
 
-            });
-
-        /*
-        |--------------------------------------------------------------------------
-        | Supervisors
-        |--------------------------------------------------------------------------
-        */
-
+        // Supervisors
         User::factory()
             ->count(3)
             ->state([
@@ -104,12 +84,7 @@ class UserSeeder extends Seeder
 
             });
 
-        /*
-        |--------------------------------------------------------------------------
-        | Guardians
-        |--------------------------------------------------------------------------
-        */
-
+        // Guardians
         User::factory()
             ->count(5)
             ->state([

@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Models\SchoolClass;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 class StudentFactory extends Factory
@@ -9,11 +10,10 @@ class StudentFactory extends Factory
     public function definition(): array
     {
         return [
-            'student_number' => null, // يتم توليده من النظام
+            'student_number' => null, // يتولّد لاحقًا بالسيدر
             'father_name' => fake()->name('male'),
             'mother_name' => fake()->name('female'),
-            'education_level' => fake()->randomElement(['primary', 'middle', 'high']),
-            'school_class' => fake()->numberBetween(1, 12),
+            'class_id' => SchoolClass::inRandomOrder()->first()?->id,
             'enrollment_date' => now(),
         ];
     }

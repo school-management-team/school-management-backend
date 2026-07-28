@@ -1,5 +1,4 @@
 <?php
-// database/seeders/DatabaseSeeder.php
 
 namespace Database\Seeders;
 
@@ -10,7 +9,13 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         $this->call([
+            StagesAndClassesSeeder::class,
+            SectionsSeeder::class,
+            SubjectsSeeder::class,
             UserSeeder::class,
+            TeacherAssignmentsSeeder::class,
+            GradesSeeder::class,
+            AttendanceSeeder::class,
         ]);
     }
 }

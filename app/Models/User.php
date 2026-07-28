@@ -203,7 +203,10 @@ class User extends Authenticatable
 
     public function isVerified(): bool
     {
-        return !is_null($this->email_verified_at);
+        if($this->status==="unverified")
+            return false;
+        else
+            return true;
     }
 
 
@@ -235,9 +238,11 @@ class User extends Authenticatable
 
 
     //Student Number
-
-    public static function getNextStudentNumberForGrade(int $gradeOrder): string
-    {
+/**
+ * الحصول على رقم الطالب التالي حسب الصف (5 أرقام)
+ */
+public static function getNextStudentNumberForGrade(int $gradeOrder): string
+{
     $ranges = config('school.student_number_ranges');
 
     if (!isset($ranges[$gradeOrder])) {
@@ -258,10 +263,13 @@ class User extends Authenticatable
             ->first();
 
         if ($lastStudent) {
-            $number = (int) $lastStudent->student_number + 1;
+            // استخراج الرقم الرقمي فقط
+            $numericPart = preg_replace('/[^0-9]/', '', $lastStudent->student_number);
+            $number = (int) $numericPart + 1;
 
+            // التحقق من عدم تجاوز النطاق
             if ($number > $end) {
-                throw new \Exception("نفدت الأرقام لهذا الصف");
+                throw new \Exception("نفدت الأرقام للصف {$gradeOrder} (الحد الأقصى: {$end})");
             }
 
             return (string) $number;
@@ -269,5 +277,14 @@ class User extends Authenticatable
 
         return (string) $start;
     });
-    }
+}
+
+/**
+ * الحصول على رقم الطالب التالي )
+ */
+public static function getNextStudentNumber(): string
+{
+    // استخدام الصف الافتراضي أو رمي خطأ
+    throw new \Exception('يجب استخدام getNextStudentNumberForGrade مع تحديد الصف');
+}
 }

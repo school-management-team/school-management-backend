@@ -230,9 +230,7 @@ public function formatUser(User $user): array
 
                         'mother_name'=>$student->mother_name,
 
-                        'education_level'=>$student->education_level,
-
-                        'school_class'=>$student->school_class
+                        'school_class'=>$student->class_id
 
                     ];
 

@@ -6,9 +6,10 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-// Student.php — كامل بعد التعديل
+
 class Student extends Model
 {
     use HasFactory, SoftDeletes;
@@ -32,4 +33,6 @@ class Student extends Model
     }
     public function schoolClass(): BelongsTo { return $this->belongsTo(SchoolClass::class, 'class_id'); }
     public function section(): BelongsTo { return $this->belongsTo(Section::class); }
+    public function attendances(): HasMany { return $this->hasMany(Attendance::class); }
+    public function grades(): HasMany { return $this->hasMany(Grade::class); }
 }
