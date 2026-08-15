@@ -9,4 +9,6 @@ class Subject extends Model
 {
     protected $fillable = ['name', 'passing_grade', 'description'];
     public function teacherAssignments(): HasMany { return $this->hasMany(TeacherAssignment::class); }
+    public function questions(): HasMany { return $this->hasMany(Question::class); }
+    public function stages() { return $this->belongsToMany(Stage::class, 'stage_subject');}
 }

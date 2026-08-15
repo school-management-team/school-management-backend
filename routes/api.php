@@ -1,19 +1,17 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\TeacherController;
 use App\Http\Controllers\AuthController;
-use App\Http\Controllers\AdminController;
+use App\Http\Controllers\AdminUserController;
+use App\Http\Controllers\AdminAcademicController;
+use Illuminate\Support\Facades\Route;
 
+// ==================== Public Routes ====================
 
-// Public Routes
-
-
-// routes/api.php
 Route::prefix('auth')->group(function () {
 
     Route::middleware('throttle:6,1')->group(function () {
         Route::post('/login', [AuthController::class, 'login']);
-
     });
 
     Route::middleware(['throttle:3,1', 'registration.open'])->group(function () {
@@ -30,92 +28,100 @@ Route::prefix('auth')->group(function () {
         Route::post('/resend-code', [AuthController::class, 'resendVerificationCode']);
     });
 });
-// Authenticated Users
 
-Route::middleware([
-    'auth:sanctum' ,
-    'active'
-])->group(function () {
+// بيانات تعبئة فورم التسجيل (بدون مصادقة، تُستخدم قبل إنشاء الحساب)
+Route::get('/stages', [AuthController::class, 'stages']);
+Route::get('/stages/{stageId}/subjects', [AuthController::class, 'subjects']);
+Route::get('/stages/{stageId}/classes', [AuthController::class, 'classesByStage']);
 
+// ==================== Authenticated Users (كل الأدوار) ====================
+
+Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
-
     Route::post('/change-password', [AuthController::class, 'changePassword']);
-
     Route::get('/profile', [AuthController::class, 'profile']);
+    Route::post('/profile/photo', [AuthController::class, 'updateProfilePhoto']);
+
+    Route::get('/teachers/{teacher}/document', [AdminUserController::class, 'downloadTeacherDocument']);
 });
 
+// ==================== Admin ====================
 
-Route::middleware('auth:sanctum')->group(function () {
-    Route::get('/teachers/{teacher}/document', [AdminController::class, 'downloadTeacherDocument']);
+Route::middleware(['auth:sanctum', 'active', 'role:admin'])->prefix('admin')->group(function () {
+
+    // إدارة المستخدمين
+    Route::get('/pending/students', [AdminUserController::class, 'pendingStudents']);
+    Route::get('/pending/teachers', [AdminUserController::class, 'pendingTeachers']);
+    Route::get('/pending/supervisors', [AdminUserController::class, 'pendingSupervisors']);
+    Route::get('/pending/guardians', [AdminUserController::class, 'pendingGuardians']);
+    Route::get('/users/{userId}', [AdminUserController::class, 'userDetails']);
+    Route::post('/users/{userId}/approve', [AdminUserController::class, 'approveUser']);
+    Route::post('/users/{userId}/reject', [AdminUserController::class, 'rejectUser']);
+    Route::get('/dashboard', [AdminUserController::class, 'dashboardStats']);
+    Route::get('/teachers', [AdminUserController::class, 'listTeachers']);
+    Route::get('/students', [AdminUserController::class, 'listStudents']);
+    Route::post('/system/lock', [AdminUserController::class, 'lockRegistration']);
+    Route::post('/system/unlock', [AdminUserController::class, 'unlockRegistration']);
+    Route::get('/system/status', [AdminUserController::class, 'systemStatus']);
+
+    // تقارير الحضور والعلامات
+    Route::get('/students/without-section', [AdminAcademicController::class, 'studentsWithoutSection']);
+    Route::get('/reports/students-distribution', [AdminAcademicController::class, 'studentsDistribution']);
+    Route::get('/attendance/day', [AdminAcademicController::class, 'dailyAttendance']);
+    Route::get('/attendance/student/{student}', [AdminAcademicController::class, 'studentAttendanceHistory']);
+    Route::get('/reports/attendance-rate', [AdminAcademicController::class, 'attendanceRateReport']);
+    Route::get('/reports/most-absent', [AdminAcademicController::class, 'mostAbsentStudents']);
+
+    Route::get('/grades/statistics', [AdminAcademicController::class, 'gradeStatistics']);
+    Route::get('/grades/pending', [AdminAcademicController::class, 'pendingGradeSubmissions']);
+    Route::post('/grade-submissions/{id}/approve', [AdminAcademicController::class, 'approveGradeSubmission']);
+    Route::post('/grade-submissions/{id}/reject', [AdminAcademicController::class, 'rejectGradeSubmission']);
+    Route::get('/students/{student}/report-card', [AdminAcademicController::class, 'studentReportCard']);
 });
 
+// ==================== Teacher ====================
 
+Route::middleware(['auth:sanctum', 'active', 'role:teacher'])->group(function () {
 
-//admin
-Route::middleware([
-    'auth:sanctum',
-    'active',
-    'role:admin'
-])->prefix('admin')->group(function () {
+    Route::get('/teacher/profile', [TeacherController::class, 'profile']);
 
+    Route::get('/teacher/announcements', [TeacherController::class, 'announcements']);
+    Route::get('/teacher/announcements/upcoming', [TeacherController::class, 'upcomingAnnouncements']);
+    Route::get('/teacher/announcements/calendar-dots', [TeacherController::class, 'announcementCalendarDots']);
+    Route::get('/teacher/announcements/{id}', [TeacherController::class, 'showAnnouncement']);
 
-    Route::get('/pending/students', [AdminController::class, 'pendingStudents']);
-    Route::get('/pending/teachers', [AdminController::class, 'pendingTeachers']);
-    Route::get('/pending/supervisors', [AdminController::class, 'pendingSupervisors']);
-    Route::get('/pending/guardians', [AdminController::class, 'pendingGuardians']);
+    Route::post('/questions', [TeacherController::class, 'storeQuestion']);
+    Route::get('/questions/list', [TeacherController::class, 'listQuestions']);
+    Route::get('/questions/recent', [TeacherController::class, 'recentQuestions']);
+    Route::get('/questions/stats', [TeacherController::class, 'questionStats']);
+    Route::get('/questions/{question}', [TeacherController::class, 'showQuestion']);
+    Route::put('/questions/{question}', [TeacherController::class, 'updateQuestion']);
+    Route::delete('/questions/delete/{question}', [TeacherController::class, 'destroyQuestion']);
 
-    // عرض العلامات المعلقة لشعبة
-    Route::get('/grades/pending-section', [AdminController::class, 'pendingSectionGrades']);
+    Route::get('/teacher/assignments/subjects', [TeacherController::class, 'assignmentSubjects']);
+    Route::get('/teacher/assignments/sections/{subjectId}', [TeacherController::class, 'assignmentSections']);
+    Route::post('/teacher/assignments/store', [TeacherController::class, 'storeAssignment']);
+    Route::get('/teacher/assignments/list', [TeacherController::class, 'listAssignments']);
 
-    // اعتماد علامات شعبة كاملة
-    Route::post('/grades/section/approve', [AdminController::class, 'approveSectionGrades']);
+    Route::post('/teacher/tasks/store', [TeacherController::class, 'storeTask']);
+    Route::get('/teacher/tasks/list', [TeacherController::class, 'listTasks']);
+    Route::get('/teacher/tasks/upcoming', [TeacherController::class, 'upcomingTasks']);
+    Route::get('/teacher/tasks/progress', [TeacherController::class, 'taskProgress']);
+    Route::get('/teacher/tasks/by-status', [TeacherController::class, 'tasksByStatus']);
+    Route::put('/teacher/tasks/update/{task}', [TeacherController::class, 'updateTask']);
+    Route::patch('/teacher/tasks/{task}/status', [TeacherController::class, 'updateTaskStatus']);
+    Route::patch('/teacher/tasks/{task}/submit', [TeacherController::class, 'submitTask']);
+    Route::delete('/teacher/tasks/{task}', [TeacherController::class, 'destroyTask']);
 
-    // رفض علامات شعبة كاملة
-    Route::post('/grades/section/reject', [AdminController::class, 'rejectSectionGrades']);
+    Route::get('/teacher/schedule/daily', [TeacherController::class, 'dailySchedule']);
+    Route::get('/teacher/schedule/weekly', [TeacherController::class, 'weeklySchedule']);
+    Route::put('/teacher/schedule/{schedule}/lesson-plan', [TeacherController::class, 'saveLessonPlan']);
 
-    // اعتماد علامة فردية
-    Route::post('/grades/{id}/approve', [AdminController::class, 'approveSingleGrade']);
+    Route::get('/teacher/dashboard', [TeacherController::class, 'dashboard']);
 
-    // رفض علامة فردية
-    Route::post('/grades/{id}/reject', [AdminController::class, 'rejectSingleGrade']);
-
-    // إعادة فتح علامة مرفوضة
-    Route::post('/grades/{id}/reopen', [AdminController::class, 'reopenGrade']);
-
-    // إحصائيات العلامات
-    Route::get('/grades/statistics', [AdminController::class, 'gradeStatistics']);
-
-
-
-    Route::get('/users/{userId}', [AdminController::class, 'userDetails']);
-
-    Route::post('/users/{userId}/approve', [AdminController::class, 'approveUser']);
-
-    Route::post('/users/{userId}/reject', [AdminController::class, 'rejectUser']);
-
-
-    Route::get('/dashboard', [AdminController::class, 'dashboardStats']);
-
-
-    Route::get('/teachers', [AdminController::class, 'listTeachers']);
-
-    Route::get('/students', [AdminController::class, 'listStudents']);
-
-    Route::post('/system/lock', [AdminController::class, 'lockRegistration']);
-    Route::post('/system/unlock', [AdminController::class, 'unlockRegistration']);
-    Route::get('/system/status', [AdminController::class, 'systemStatus']);
-
-    Route::get('/students/without-section', [AdminController::class, 'studentsWithoutSection']);
-    Route::get('/reports/students-distribution', [AdminController::class, 'studentsDistribution']);
-    Route::get('/attendance/day', [AdminController::class, 'dailyAttendance']);
-
-    Route::get('/attendance/student/{student}', [AdminController::class, 'studentAttendanceHistory']);
-    Route::get('/reports/attendance-rate', [AdminController::class, 'attendanceRateReport']);
-    Route::get('/reports/most-absent', [AdminController::class, 'mostAbsentStudents']);
-
-    Route::get('/grades/pending', [AdminController::class, 'pendingSectionGrades']);
-    Route::post('/grades/section/approve', [AdminController::class, 'approveSectionGrades']);
-    Route::post('/grades/section/reject', [AdminController::class, 'rejectSectionGrades']);
-    Route::get('/students/{student}/report-card', [AdminController::class, 'studentReportCard']);
-
+    Route::get('/teacher/sections', [TeacherController::class, 'mySections']);
+    Route::post('/teacher/grades', [TeacherController::class, 'storeGrade']);
+    Route::get('/teacher/sections/{teacherAssignmentId}/students', [TeacherController::class, 'studentsForGrading']);
+    Route::post('/teacher/sections/{teacherAssignmentId}/grades', [TeacherController::class, 'storeBulkGrades']);
+    Route::get('/teacher/sections/{teacherAssignmentId}/grade-status', [TeacherController::class, 'sectionGradeStatus']);
 });

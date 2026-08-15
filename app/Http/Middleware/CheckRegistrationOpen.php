@@ -14,6 +14,10 @@ class CheckRegistrationOpen
     {
         $setting = SystemSetting::latest()->first();
 
+        if (!$setting) {
+            $setting = SystemSetting::create(['registration_locked' => false]);
+        }
+
         if ($setting->registration_locked) {
             return response()->json([
                 'success' => false,

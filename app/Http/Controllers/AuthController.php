@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\SchoolClass;
+use App\Models\Stage;
+use App\Models\Subject;
 use App\Models\Supervisor;
 use App\Models\User;
 use App\Models\Student;
@@ -14,6 +16,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 class AuthController extends Controller
 {
@@ -30,7 +33,7 @@ class AuthController extends Controller
     public function login(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'login' => 'required|string',
+            'email' => 'required|email',
             'password' => 'required|string',
             'remember' => 'boolean'
         ]);
@@ -43,7 +46,7 @@ class AuthController extends Controller
         }
 
         $result = $this->authService->login(
-            $request->login,
+            $request->email,
             $request->password,
             $request->remember ?? false
         );
@@ -60,11 +63,12 @@ class AuthController extends Controller
 public function registerStudent(Request $request)
 {
     $validator = Validator::make($request->all(), [
-        'login' => 'required|string|unique:users,email|unique:users,phone',
+        'email' => 'required|string|unique:users,email',
         'password' => 'required|string|min:8|confirmed',
+        'phone' =>['required', 'regex:/^09[0-9]{8}$/', 'unique:users,phone'],
         'user_name' => 'required|string|max:100',
         'gender' => 'required|in:male,female',
-        'birth_date' => 'required|date',
+        'birth_date' => ['required', 'date', 'before_or_equal:' . now()->subYears(15)->format('Y-m-d')],
         'father_name' => 'required|string|max:100',
         'mother_name' => 'required|string|max:100',
         'class_id' => 'required|integer|exists:classes,id',
@@ -102,13 +106,13 @@ public function registerStudent(Request $request)
         ]);
 
         $code = $user->generateVerificationCode();
-        $link = $this->sendVerificationCode($user, $code);
+        $this->sendEmailCode($user, $code);
         DB::commit();
 
         return response()->json([
             'success' => true,
-            'message' => 'تم إنشاء الحساب بنجاح بانتظار موافقة الادارة.',
-            'data' => ['user_id' => $user->id, 'requires_verification' => true, 'whatsapp_link' => $link],
+            'message' => 'تم إنشاء الحساب بنجاح , يرجى تفعيل الحساب.',
+            'data' => ['user_id' => $user->id, 'requires_verification' => true],
         ], 201);
 
     } catch (\Exception $e) {
@@ -127,18 +131,27 @@ public function registerStudent(Request $request)
 public function registerTeacher(Request $request)
 {
     $validator = Validator::make($request->all(), [
-        'login' => 'required|string|unique:users,email|unique:users,phone',
+        'email' => 'required|string|unique:users,email',
         'password' => 'required|string|min:8|confirmed',
+        'phone' => ['required', 'regex:/^09[0-9]{8}$/', 'unique:users,phone'],
         'user_name' => 'required|string|max:100',
         'gender' => 'required|in:male,female',
-        'birth_date' => 'required|date',
-        'specialization' => 'required|string|max:100',
+        'birth_date' => ['required', 'date', 'before_or_equal:' . now()->subYears(21)->format('Y-m-d')],
+        'subject_id' => 'required|exists:subjects,id',
+        'stage_id' => 'required|exists:stages,id',
         'cv' => 'required|string|max:5000',
         'legal_document_path' => 'required|file|mimes:pdf,jpg,jpeg,png|max:4096',
     ]);
 
     if ($validator->fails()) {
         return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+    }
+    $stage = Stage::find($request->stage_id);
+    if (!$stage->subjects()->where('subjects.id', $request->subject_id)->exists()) {
+        return response()->json([
+        'success' => false,
+        'message' => 'هذه المادة غير متاحة لهذه المرحلة',
+        ], 422);
     }
 
     DB::beginTransaction();
@@ -149,19 +162,20 @@ public function registerTeacher(Request $request)
 
         Teacher::create([
             'user_id' => $user->id,
-            'specialization' => $request->specialization,
+            'subject_id' => $request->subject_id,
+            'stage_id' => $request->stage_id,
             'cv' => $request->cv,
             'legal_document_path' => $documentPath,
         ]);
 
         $code = $user->generateVerificationCode();
-        $link = $this->sendVerificationCode($user, $code);
+        $this->sendEmailCode($user, $code);
         DB::commit();
 
         return response()->json([
             'success' => true,
-            'message' => 'تم إنشاء الحساب بنجاح بانتظار موافقة الادارة.',
-            'data' => ['user_id' => $user->id, 'requires_verification' => true, 'whatsapp_link' => $link],
+            'message' => 'تم إنشاء الحساب بنجاح , يرجى تفعيل الحساب.',
+            'data' => ['user_id' => $user->id, 'requires_verification' => true],
         ], 201);
 
     } catch (\Exception $e) {
@@ -178,9 +192,11 @@ public function registerGuardian(Request $request)
 {
     $validator = Validator::make($request->all(), [
 
-        'login' => 'required|string|unique:users,email|unique:users,phone',
+        'email' => 'required|email|unique:users,email',
 
         'password' => 'required|string|min:8|confirmed',
+
+        'phone' =>  ['required', 'regex:/^09[0-9]{8}$/', 'unique:users,phone'],
 
         'user_name' => 'required|string|max:100',
 
@@ -231,7 +247,7 @@ public function registerGuardian(Request $request)
         // إرسال كود التحقق
         $code = $user->generateVerificationCode();
 
-        $link = $this->sendVerificationCode($user, $code);
+        $this->sendEmailCode($user, $code);
 
         DB::commit();
 
@@ -239,16 +255,13 @@ public function registerGuardian(Request $request)
 
             'success' => true,
 
-            'message' => 'تم إنشاء الحساب بنجاح بانتظار موافقة الادارة. ',
+            'message' => 'تم إنشاء الحساب بنجاح , يرجى تفعيل الحساب. ',
 
             'data' => [
 
                 'user_id' => $user->id,
 
                 'requires_verification' => true,
-
-                'whatsapp_link' => $link
-
             ]
 
         ], 201);
@@ -274,15 +287,17 @@ public function registerSupervisor(Request $request)
 {
     $validator = Validator::make($request->all(), [
 
-        'login' => 'required|string|unique:users,email|unique:users,phone',
+        'email' => 'required|email|unique:users,email',
 
         'password' => 'required|string|min:8|confirmed',
+
+        'phone' => ['required', 'regex:/^09[0-9]{8}$/', 'unique:users,phone'],
 
         'user_name' => 'required|string|max:100',
 
         'gender' => 'required|in:male,female',
 
-        'birth_date' => 'required|date',
+        'birth_date' => ['required', 'date', 'before_or_equal:' . now()->subYears(25)->format('Y-m-d')],
 
         'educational_qualification' => 'required|in:bachelor,master,doctorate',
 
@@ -313,6 +328,7 @@ public function registerSupervisor(Request $request)
             'supervisor'
         );
 
+
         // رفع الملف
         $cvPath = $request
             ->file('cv_file')
@@ -336,7 +352,7 @@ public function registerSupervisor(Request $request)
         // إنشاء وإرسال كود التحقق
         $code = $user->generateVerificationCode();
 
-        $link = $this->sendVerificationCode($user, $code);
+        $this->sendEmailCode($user, $code);
 
         DB::commit();
 
@@ -344,15 +360,13 @@ public function registerSupervisor(Request $request)
 
             'success' => true,
 
-            'message' => 'تم إنشاء الحساب بنجاح بانتظار موافقة الادارة.',
+            'message' => 'تم إنشاء الحساب بنجاح , يرجى تفعيل الحساب .',
 
             'data' => [
 
                 'user_id' => $user->id,
 
                 'requires_verification' => true,
-
-                'whatsapp_link' => $link
 
             ]
 
@@ -379,7 +393,7 @@ public function registerSupervisor(Request $request)
 public function forgotPassword(Request $request)
 {
     $validator = Validator::make($request->all(), [
-        'login' => 'required|string'
+        'email' => 'required|string'
     ]);
 
     if ($validator->fails()) {
@@ -389,10 +403,7 @@ public function forgotPassword(Request $request)
         ], 422);
     }
 
-    $user = filter_var($request->login, FILTER_VALIDATE_EMAIL)
-        ? User::where('email', $request->login)->first()
-        : User::where('phone', $request->login)->first();
-
+    $user = User::where('email', $request->email)->first();
     if (!$user) {
         return response()->json([
             'success' => false,
@@ -402,14 +413,11 @@ public function forgotPassword(Request $request)
 
     $code = $user->generateVerificationCode();
 
-    $link = $this->sendVerificationCode($user, $code);
+    $this->sendEmailCode($user, $code);
 
     return response()->json([
         'success' => true,
         'message' => 'تم إرسال رمز إعادة تعيين كلمة المرور.',
-        'data' => [
-            'whatsapp_link' => $link
-        ]
     ]);
 }
 
@@ -418,7 +426,7 @@ public function resetPassword(Request $request)
 {
     $validator = Validator::make($request->all(), [
 
-        'login' => 'required|string',
+        'email' => 'required|string',
 
         'code' => 'required|string|size:6',
 
@@ -437,7 +445,7 @@ public function resetPassword(Request $request)
 
     $result = $this->authService->confirmPasswordReset(
 
-        $request->login,
+        $request->email,
 
         $request->code,
 
@@ -488,7 +496,7 @@ public function changePassword(Request $request)
 public function verifyAccount(Request $request)
 {
     $validator = Validator::make($request->all(), [
-        'login' => 'required|string',
+        'email' => 'required|string',
         'code' => 'required|string|size:6'
     ]);
 
@@ -499,9 +507,7 @@ public function verifyAccount(Request $request)
         ], 422);
     }
 
-    $user = filter_var($request->login, FILTER_VALIDATE_EMAIL)
-        ? User::where('email', $request->login)->first()
-        : User::where('phone', $request->login)->first();
+    $user = User::where('email', $request->email)->first();
 
     if (!$user) {
         return response()->json([
@@ -539,7 +545,7 @@ public function verifyAccount(Request $request)
 public function resendVerificationCode(Request $request)
 {
     $validator = Validator::make($request->all(), [
-        'login' => 'required|string'
+        'email' => 'required|email'
     ]);
 
     if ($validator->fails()) {
@@ -549,10 +555,7 @@ public function resendVerificationCode(Request $request)
         ], 422);
     }
 
-    $user = filter_var($request->login, FILTER_VALIDATE_EMAIL)
-        ? User::where('email', $request->login)->first()
-        : User::where('phone', $request->login)->first();
-
+    $user = User::where('email', $request->email)->first();
     if (!$user) {
         return response()->json([
             'success' => false,
@@ -575,56 +578,50 @@ public function resendVerificationCode(Request $request)
 
     $code = $user->generateVerificationCode();
 
-    $whatsappLink = $this->sendVerificationCode($user, $code);
+    $this->sendEmailCode($user, $code);
 
-    $response = [];
-
-    if ($whatsappLink) {
-        $response['whatsapp_link'] = $whatsappLink;
-        $message = 'تم إنشاء رابط واتساب لإرسال رمز التحقق.';
-    } else {
-        $message = 'تم إرسال رمز التحقق إلى بريدك الإلكتروني.';
-    }
 
     return response()->json([
         'success' => true,
-        'message' => $message,
-        'data' => $response
+        'message' => 'تم إرسال رمز التحقق إلى بريدك الإلكتروني.',
     ]);
 }
 public function profile(Request $request)
 {
+    return response()->json([
+        'success' => true,
+        'data' => $this->authService->formatUser($request->user())
+    ]);
+}
+
+// رفع/تحديث صورة البروفايل (لكل الأدوار)
+public function updateProfilePhoto(Request $request)
+{
+    $validator = Validator::make($request->all(), [
+        'photo' => 'required|image|max:2048',
+    ]);
+
+    if ($validator->fails()) {
+        return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+    }
+
     $user = $request->user();
 
-    $user->load([
-        'teacher',
-        'student.guardians',
-        'guardian.students',
-        'supervisor'
-    ]);
+    if ($user->profile_photo_path) {
+        Storage::disk('public')->delete($user->profile_photo_path);
+    }
+
+    $path = $request->file('photo')->store('profile-photos', 'public');
+
+    $user->update(['profile_photo_path' => $path]);
 
     return response()->json([
         'success' => true,
-        'data' => $this->authService->formatUser($user)
+        'message' => 'تم تحديث الصورة الشخصية بنجاح',
+        'data' => ['profile_photo_path' => $path],
     ]);
 }
-private function sendVerificationCode(User $user, string $code): ?string
-{
-    if ($user->email) {
 
-        $this->sendEmailCode($user, $code);
-
-        return null;
-    }
-
-    if ($user->phone) {
-
-        return $this->sendSmsCode($user, $code);
-
-    }
-
-    return null;
-}
 private function sendEmailCode(User $user, string $code): void
 {
     $message =
@@ -646,9 +643,34 @@ private function sendEmailCode(User $user, string $code): void
 
     });
 }
-private function sendSmsCode(User $user, string $code): string
+
+
+
+public function stages()
 {
-    return "https://wa.me/{$user->phone}?text=" .
-        urlencode("رمز التحقق الخاص بك هو: {$code}");
+
+    return response()->json(['success' => true, 'data' => Stage::all(['id','name'])]);
 }
+
+public function subjects(int $stageId)
+{
+    $stage = Stage::with('subjects:id,name')->find($stageId);
+
+    if (!$stage) {
+        return response()->json(['success' => false, 'message' => 'المرحلة غير موجودة'], 404);
+    }
+
+    return response()->json(['success' => true, 'data' => $stage->subjects]);
+}
+
+public function classesByStage(int $stageId)
+{
+    $classes = SchoolClass::where('stage_id', $stageId)
+        ->orderBy('grade_order')
+        ->get(['id', 'name', 'grade_order']);
+
+    return response()->json(['success' => true, 'data' => $classes]);
+}
+
+
 }

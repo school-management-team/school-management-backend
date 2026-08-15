@@ -5,111 +5,98 @@ namespace App\Services;
 use App\Models\User;
 use App\Models\Student;
 use App\Models\Guardian;
-use App\Models\PasswordReset;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Storage;
 
 
 class AuthService
 {
     // تسجيل الدخول
-    public function login(string $login, string $password, bool $remember = false): array
-{
-    $user = filter_var($login, FILTER_VALIDATE_EMAIL)
-        ? User::where('email', $login)->first()
-        : User::where('phone', $login)->first();
+    public function login(string $email, string $password, bool $remember = false): array
+    {
+        $user = User::where('email', $email)->first();
 
-    if (!$user) {
-        return [
-            'success' => false,
-            'message' => 'بيانات تسجيل الدخول غير صحيحة'
-        ];
-    }
+        if (!$user) {
+            return ['success' => false, 'message' => 'بيانات تسجيل الدخول غير صحيحة'];
+        }
 
-    if ($user->isLocked()) {
-        return [
+        if ($user->isLocked()) {
+            return [
             'success' => false,
             'message' => 'الحساب مقفل لمدة '.$user->getLockRemainingMinutes().' دقيقة'
-        ];
-    }
+            ];
+        }
 
-    if ($user->status!=='active') {
-        return [
+        if ($user->status!=='active') {
+            return [
             'success' => false,
             'message' => 'لا يمكن تسجيل الدخول الان يرجى الانتظار'
-        ];
-    }
+            ];
+        }
 
 
 
     if (!Hash::check($password, $user->password)) {
-
         $user->recordFailedAttempt();
 
         return [
-            'success'=>false,
-            'message'=>'كلمة المرور غير صحيحة'
+        'success' => false,
+        'message' => 'كلمة المرور غير صحيحة',
+        'remaining_attempts' => $user->getRemainingAttempts(),
         ];
     }
 
-    $user->resetFailedAttempts();
+        $user->resetFailedAttempts();
 
-    $expiration = $remember
+        $expiration = $remember
         ? now()->addDays(30)
         : now()->addHours(2);
 
-    $token = $user
+        $token = $user
         ->createToken('auth_token',['*'],$expiration)
         ->plainTextToken;
 
-    $user->update([
-        'last_login_at'=>now()
-    ]);
+        $user->update([
+            'last_login_at'=>now()
+        ]);
 
-    return [
+        return [
         'success'=>true,
         'message'=>'تم تسجيل الدخول بنجاح',
-        'data'=>[
+            'data'=>[
             'user'=>$this->formatUser($user),
             'token'=>$token,
             'expires_at'=>$expiration
-        ]
-    ];
-}
-public function createUser(array $data, string $role): User
-{
-    $email = filter_var($data['login'], FILTER_VALIDATE_EMAIL)
-        ? $data['login']
-        : null;
-
-    $phone = filter_var($data['login'], FILTER_VALIDATE_EMAIL)
-        ? null
-        : $data['login'];
-
-    return User::create([
+            ]
+        ];
+    }
+    public function createUser(array $data, string $role): User
+    {
+        return User::create([
         'user_name' => $data['user_name'],
-        'email' => $email,
-        'phone' => $phone,
+        'email' => $data['email'],
+        'phone' => $data['phone'],
         'password' => Hash::make($data['password']),
         'role' => $role,
         'gender' => $data['gender'],
         'birth_date' => $data['birth_date'],
         'status' => 'unverified',
         'password_changed_at' => now(),
-    ]);
-}
+        ]);
+
+
+    }
     //  تسجيل الخروج
 
-public function logout(User $user): array
-{
-    $user->currentAccessToken()->delete();
+    public function logout(User $user): array
+    {
+        $user->currentAccessToken()->delete();
 
-    return [
+        return [
         'success'=>true,
         'message'=>'تم تسجيل الخروج'
-    ];
-}
+        ];
+    }
 
 
     // تغيير كلمة المرور
@@ -135,59 +122,50 @@ public function changePassword(User $user,string $current,string $new): array
 }
     //  تأكيد إعادة تعيين كلمة المرور
 
-public function confirmPasswordReset(
-    string $login,
-    string $code,
-    string $password
-): array
-{
-    $user = filter_var($login,FILTER_VALIDATE_EMAIL)
-        ? User::where('email',$login)->first()
-        : User::where('phone',$login)->first();
-
-    if(!$user)
+    public function confirmPasswordReset( string $email, string $code, string $password ): array
     {
-        return [
-            'success'=>false,
-            'message'=>'المستخدم غير موجود'
-        ];
-    }
+        $user = User::where('email', $email)->first();
 
-    if(!$user->verifyCode($code))
-    {
-        return [
+        if (!$user) {
+            return ['success' => false, 'message' => 'المستخدم غير موجود'];
+        }
+
+        if(!$user->verifyCode($code))
+        {
+            return [
             'success'=>false,
             'message'=>'رمز التحقق غير صحيح أو منتهي الصلاحية'
-        ];
-    }
+            ];
+        }
 
-    $user->update([
+        $user->update([
         'password'=>Hash::make($password),
         'password_changed_at'=>now()
-    ]);
+        ]);
 
-    $user->tokens()->delete();
+        $user->tokens()->delete();
 
-    return [
+        return [
         'success'=>true,
         'message'=>'تم تغيير كلمة المرور'
-    ];
-}
+        ];
+    }
 public function formatUser(User $user): array
 {
     $user->load(['student.schoolClass.stage', 'student.section', 'teacher', 'guardian.students', 'supervisor']);
 
-    $data = [
-        'id' => $user->id,
-        'user_name' => $user->user_name,
-        'email' => $user->email,
-        'phone' => $user->phone,
-        'role' => $user->role,
-        'status' => $user->status,
-        'gender' => $user->gender,
-        'birth_date' => $user->birth_date,
-        'email_verified' => $user->isVerified(),
-    ];
+$data = [
+    'id' => $user->id,
+    'user_name' => $user->user_name,
+    'email' => $user->email,
+    'phone' => $user->phone,
+    'role' => $user->role,
+    'status' => $user->status,
+    'gender' => $user->gender,
+    'birth_date' => $user->birth_date,
+    'email_verified' => $user->isVerified(),
+    'profile_photo_url' => $user->profile_photo_path ? asset('storage/' . $user->profile_photo_path) : null,
+];
 
     if ($user->isAdmin()) return $data;
 
@@ -205,7 +183,8 @@ public function formatUser(User $user): array
 
     if ($user->isTeacher()) {
         $data['profile'] = [
-            'specialization' => $user->teacher?->specialization,
+            'subject' => $user->teacher?->subject?->name,
+            'stage' => $user->teacher?->stage?->name,
             'cv' => $user->teacher?->cv,
         ];
     }

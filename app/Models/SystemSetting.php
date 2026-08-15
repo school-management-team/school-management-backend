@@ -17,8 +17,5 @@ class SystemSetting extends Model
         'locked_at' => 'datetime',
     ];
 
-    public static function current(): self
-    {
-        return static::query()->firstOrCreate([]);
-    }
+
 }

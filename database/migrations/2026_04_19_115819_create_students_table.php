@@ -19,10 +19,7 @@ return new class extends Migration
             $table->foreignId('user_id')->unique()->constrained('users');
             $table->foreignId('class_id')->constrained('classes');
             $table->foreignId('section_id')->nullable()->constrained('sections')->nullOnDelete();
-
             $table->timestamps();
-            $table->softDeletes();
-
 
         });
     }

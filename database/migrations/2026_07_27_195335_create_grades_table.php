@@ -15,10 +15,11 @@ public function up(): void
         $table->id();
         $table->foreignId('student_id')->constrained('students')->cascadeOnDelete();
         $table->foreignId('teacher_assignment_id')->constrained('teacher_assignments')->cascadeOnDelete();
-        $table->enum('type', ['homework', 'quiz', 'exam', 'participation', 'other']);
+        $table->enum('type', [ 'quiz', 'exam', 'participation']);
+        $table->unsignedTinyInteger('semester');
         $table->double('value');
         $table->enum('status', ['draft', 'approved', 'rejected'])->default('draft');
-        $table->timestamps();
+       $table->unique(['student_id', 'teacher_assignment_id', 'type', 'semester']);
     });
 }
 public function down(): void { Schema::dropIfExists('grades'); }

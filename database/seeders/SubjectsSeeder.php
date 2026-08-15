@@ -9,15 +9,10 @@ class SubjectsSeeder extends Seeder
 {
     public function run(): void
     {
-        $subjects = [
-            ['name' => 'الرياضيات', 'passing_grade' => 50],
-            ['name' => 'اللغة العربية', 'passing_grade' => 50],
-            ['name' => 'اللغة الإنجليزية', 'passing_grade' => 50],
-            ['name' => 'العلوم', 'passing_grade' => 50],
-        ];
+$subjects = ['رياضيات', 'فيزياء', 'كيمياء', 'أحياء', 'اللغة العربية', 'اللغة الإنجليزية', 'التاريخ', 'الجغرافيا'];
 
-        foreach ($subjects as $subject) {
-            Subject::firstOrCreate(['name' => $subject['name']], $subject);
+        foreach ($subjects as $name) {
+            Subject::create(['name' => $name, 'passing_grade' => 50]);
         }
     }
 }

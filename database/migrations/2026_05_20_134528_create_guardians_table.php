@@ -15,9 +15,7 @@ return new class extends Migration
             $table->string('verification_student_number')->nullable();
 
             $table->foreignId('user_id')->unique()->constrained('users');
-
             $table->timestamps();
-            $table->softDeletes();
         });
     }
 

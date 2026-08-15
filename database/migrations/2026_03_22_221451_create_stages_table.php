@@ -13,7 +13,7 @@ public function up(): void
 {
     Schema::create('stages', function (Blueprint $table) {
         $table->id();
-        $table->enum('name', ['primary', 'middle', 'high'])->unique();
+        $table->enum('name', ['primary', 'middle', 'high_scientific','high_literary'])->unique();
         $table->timestamps();
     });
 }

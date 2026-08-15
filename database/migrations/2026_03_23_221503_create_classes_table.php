@@ -14,8 +14,10 @@ public function up(): void
     Schema::create('classes', function (Blueprint $table) {
         $table->id();
         $table->string('name');
-        $table->unsignedTinyInteger('grade_order')->unique(); // يطابق مفاتيح config.school (1-12)
+        $table->unsignedTinyInteger('grade_order'); // يطابق مفاتيح config.school (1-12)
         $table->foreignId('stage_id')->constrained('stages');
+
+        $table->unique(['stage_id', 'grade_order']);
         $table->timestamps();
     });
 }

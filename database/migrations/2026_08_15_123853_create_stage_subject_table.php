@@ -11,16 +11,13 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('supervisors', function (Blueprint $table) {
+        Schema::create('stage_subject', function (Blueprint $table) {
             $table->id();
-            $table->enum('educational_qualification', ['bachelor', 'master', 'doctorate']);
-            $table->string('specialization');
-            $table->text('bio');
-            $table->string('cv_file');
-
-            $table->foreignId('user_id')->unique()->constrained('users');
+            $table->foreignId('stage_id')->constrained('stages')->cascadeOnDelete();
+            $table->foreignId('subject_id')->constrained('subjects')->cascadeOnDelete();
             $table->timestamps();
 
+            $table->unique(['stage_id', 'subject_id']);
         });
     }
 
@@ -29,6 +26,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('supervisors');
+        Schema::dropIfExists('stage_subject');
     }
 };

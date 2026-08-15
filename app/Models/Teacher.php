@@ -10,10 +10,10 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Teacher extends Model
 {
-    use HasFactory, SoftDeletes;
+    use HasFactory;
 
     protected $fillable = [
-        'specialization',
+        'subject_id', 'stage_id',
         'cv',
         'legal_document_path',
         'user_id',
@@ -21,4 +21,8 @@ class Teacher extends Model
 
     public function user(): BelongsTo { return $this->belongsTo(User::class); }
     public function assignments(): HasMany { return $this->hasMany(TeacherAssignment::class); }
+    public function questions(): HasMany { return $this->hasMany(Question::class); }
+    public function weeklySchedules(): HasMany { return $this->hasMany(WeeklySchedule::class); }
+    public function subject(): BelongsTo { return $this->belongsTo(Subject::class); }
+    public function stage(): BelongsTo { return $this->belongsTo(Stage::class); }
 }

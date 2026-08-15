@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Supervisor extends Model
 {
-     use HasFactory, SoftDeletes;
+     use HasFactory;
         protected $fillable = [
         'educational_qualification',
         'specialization',
@@ -25,4 +25,5 @@ class Supervisor extends Model
 
 
     public function recordedAttendances(): HasMany { return $this->hasMany(Attendance::class); }
+    public function announcements(): HasMany { return $this->hasMany(Announcement::class); }
 }

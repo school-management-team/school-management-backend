@@ -1,5 +1,4 @@
 <?php
-// database/migrations/0001_01_01_000001_create_teachers_table.php
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
@@ -12,17 +11,15 @@ return new class extends Migration
         Schema::create('teachers', function (Blueprint $table) {
             $table->id();
 
-
-            $table->string('specialization');
+            $table->foreignId('user_id')->unique()->constrained('users');
+            $table->foreignId('subject_id')->constrained('subjects');
+            $table->foreignId('stage_id')->constrained('stages');
 
             // المستندات
             $table->text('cv');
             $table->string('legal_document_path');
 
-            $table->foreignId('user_id')->unique()->constrained('users');
-
             $table->timestamps();
-            $table->softDeletes();
 
         });
     }

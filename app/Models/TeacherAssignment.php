@@ -14,4 +14,7 @@ class TeacherAssignment extends Model
     public function subject(): BelongsTo { return $this->belongsTo(Subject::class); }
     public function section(): BelongsTo { return $this->belongsTo(Section::class); }
     public function grades(): HasMany { return $this->hasMany(Grade::class); }
+    public function assignments(): HasMany { return $this->hasMany(Assignment::class); }
+    public function tasks(): HasMany { return $this->hasMany(TeacherTask::class); }
+    public function weeklySchedules(): HasMany { return $this->hasMany(WeeklySchedule::class); }
 }

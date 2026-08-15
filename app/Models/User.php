@@ -278,13 +278,4 @@ public static function getNextStudentNumberForGrade(int $gradeOrder): string
         return (string) $start;
     });
 }
-
-/**
- * الحصول على رقم الطالب التالي )
- */
-public static function getNextStudentNumber(): string
-{
-    // استخدام الصف الافتراضي أو رمي خطأ
-    throw new \Exception('يجب استخدام getNextStudentNumberForGrade مع تحديد الصف');
-}
 }

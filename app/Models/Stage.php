@@ -9,4 +9,5 @@ class Stage extends Model
 {
      protected $fillable = ['name'];
     public function classes(): HasMany { return $this->hasMany(SchoolClass::class); }
+    public function subjects() { return $this->belongsToMany(Subject::class, 'stage_subject');}
 }
