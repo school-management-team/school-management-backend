@@ -21,7 +21,12 @@ class AttendanceSeeder extends Seeder
         $this->command->info('بدء إنشاء سجلات الحضور...');
 
         $supervisorId = Supervisor::first()?->id ?? 1;
-        $students = Student::take(10)->get();
+        $students = Student::whereNotNull('section_id')->take(10)->get();
+        
+if ($students->isEmpty()) {
+    $this->command->warn('لا يوجد طلاب مرتبطون بشعب. قم أولًا بتوزيع الطلاب على الشعب.');
+    return;
+}
         $statuses = ['present', 'present', 'present', 'present', 'absent', 'present', 'late', 'present', 'excused', 'present'];
         $excuses = ['مرض', 'عذر عائلي', 'ظروف طارئة', 'موعد طبي', null, null, null];
 
@@ -75,7 +80,11 @@ class AttendanceSeeder extends Seeder
 
         $this->command->info('إنشاء سجلات حضور لشهر كامل...');
 
-        $students = Student::with('section')->take(5)->get();
+        $students = Student::with('section')->whereNotNull('section_id')->take(5)->get();
+        if ($students->isEmpty()) {
+    $this->command->warn('لا يوجد طلاب مرتبطون بشعب لإنشاء سجلات شهر كامل.');
+    return;
+}
         $startDate = Carbon::now()->startOfMonth();
         $endDate = Carbon::now()->endOfMonth();
 
@@ -120,8 +129,14 @@ class AttendanceSeeder extends Seeder
 
         $this->command->info('إنشاء سجلات حضور لشعبة محددة...');
 
-        $section = Section::inRandomOrder()->first();
-        $studentsInSection = Student::where('section_id', $section->id)->take(3)->get();
+        $section = Section::whereHas('students')->inRandomOrder()->first();
+
+if (!$section) {
+    $this->command->warn('لا توجد أي شعبة تحتوي على طلاب.');
+    return;
+}
+
+$studentsInSection = Student::where('section_id', $section->id)->take(3)->get();
         $dates = ['2026-07-20', '2026-07-21', '2026-07-22', '2026-07-23', '2026-07-24'];
 
         foreach ($studentsInSection as $student) {

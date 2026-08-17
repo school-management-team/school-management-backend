@@ -13,11 +13,17 @@ class StageSeeder extends Seeder
      */
     public function run(): void
     {
-            Stage::insert([
-            ['name' => 'primary', 'created_at' => now(), 'updated_at' => now()],
-            ['name' => 'middle', 'created_at' => now(), 'updated_at' => now()],
-            ['name' => 'high_scientific', 'created_at' => now(), 'updated_at' => now()],
-            ['name' => 'high_literary', 'created_at' => now(), 'updated_at' => now()],
-        ]);
+            $stages = [
+            'primary',
+            'middle',
+            'high_scientific',
+            'high_literary',
+        ];
+
+        foreach ($stages as $stageName) {
+            Stage::updateOrCreate(
+                ['name' => $stageName],
+                ['name' => $stageName]
+            );}
     }
 }

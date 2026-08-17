@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Section extends Model
 {
-    protected $fillable = ['name', 'class_id'];
+    protected $fillable = ['name', 'class_id','capacity'];
 
     public function schoolClass(): BelongsTo { return $this->belongsTo(SchoolClass::class, 'class_id'); }
     public function students(): HasMany { return $this->hasMany(Student::class); }

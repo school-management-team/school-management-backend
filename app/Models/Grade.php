@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class Grade extends Model
 {
     use HasFactory;
-
+public $timestamps = false;
     protected $fillable = [
         'student_id', 'teacher_assignment_id', 'type', 'semester', 'value', 'status',
     ];
