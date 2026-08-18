@@ -133,30 +133,27 @@ Route::middleware(['auth:sanctum', 'active', 'role:teacher'])->group(function ()
     });
 //=================superivsor=========================
 
-Route::prefix('supervisor')->middleware(['auth:sanctum'])->group(function () {
+Route::middleware(['auth:sanctum', 'active', 'role:supervisor,admin'])->prefix('supervisor')->group(function () {
+
     Route::get('/classes', [ClassController::class, 'index']);
     Route::post('/classes', [ClassController::class, 'store']);
-  Route::put('/classes/{schoolClass}', [ClassController::class, 'update']);
-});
+    Route::put('/classes/{schoolClass}', [ClassController::class, 'update']);
 
-Route::middleware('auth:sanctum')->prefix('supervisor')->group(function () {
     Route::get('/sections', [SectionController::class, 'index']);
     Route::post('/sections', [SectionController::class, 'store']);
     Route::put('/sections/{section}', [SectionController::class, 'update']);
-});
-Route::middleware('auth:sanctum')->prefix('supervisor')->group(function () {
+
     Route::post('/students/assign-sections', [StudentSectionController::class, 'assign']);
-     Route::get('/students/sections-overview', [StudentSectionController::class, 'sectionsOverview']);
-     Route::post('/students/transfer-section', [StudentSectionController::class, 'transfer']);
+    Route::get('/students/sections-overview', [StudentSectionController::class, 'sectionsOverview']);
+    Route::post('/students/transfer-section', [StudentSectionController::class, 'transfer']);
 
-
-      Route::get('/subjects', [SubjectController::class, 'index']);
+    Route::get('/subjects', [SubjectController::class, 'index']);
     Route::post('/subjects', [SubjectController::class, 'store']);
     Route::put('/subjects/{subject}', [SubjectController::class, 'update']);
     Route::delete('/subjects/{subject}', [SubjectController::class, 'destroy']);
-      Route::get('/teacher-assignments', [TeacherAssignmentController::class, 'index']);
+
+    Route::get('/teacher-assignments', [TeacherAssignmentController::class, 'index']);
     Route::post('/teacher-assignments', [TeacherAssignmentController::class, 'store']);
     Route::put('/teacher-assignments/{teacherAssignment}', [TeacherAssignmentController::class, 'update']);
     Route::delete('/teacher-assignments/{teacherAssignment}', [TeacherAssignmentController::class, 'destroy']);
-
 });

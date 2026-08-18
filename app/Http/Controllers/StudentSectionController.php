@@ -40,26 +40,26 @@ class StudentSectionController extends Controller
                 ->orderBy('id')
                 ->get();
 
-            $assigned = [];
-            $unassigned = [];
-            $sectionSummaries = [];
+            $freeSlots = [];
 
             foreach ($sections as $section) {
                 $currentCount = Student::where('section_id', $section->id)->count();
-                $availableSlots = max(0, $section->capacity - $currentCount);
+                $freeSlots[$section->id] = max(0, $section->capacity - $currentCount);
+            }
 
-                $sectionSummaries[] = [
-                    'section_id' => $section->id,
-                    'section_name' => $section->name,
-                    'capacity' => $section->capacity,
-                    'current_count' => $currentCount,
-                    'available_slots' => $availableSlots,
-                ];
+            $assigned = [];
 
-                while ($availableSlots > 0 && $students->isNotEmpty()) {
+            while ($students->isNotEmpty() && array_sum($freeSlots) > 0) {
+                foreach ($sections as $section) {
+                    if ($students->isEmpty() || $freeSlots[$section->id] < 1) {
+                        continue;
+                    }
+
                     $student = $students->shift();
                     $student->section_id = $section->id;
                     $student->save();
+
+                    $freeSlots[$section->id]--;
 
                     $assigned[] = [
                         'student_id' => $student->id,
@@ -67,15 +67,29 @@ class StudentSectionController extends Controller
                         'section_id' => $section->id,
                         'section_name' => $section->name,
                     ];
-
-                    $availableSlots--;
                 }
             }
+
+            $unassigned = [];
 
             foreach ($students as $student) {
                 $unassigned[] = [
                     'student_id' => $student->id,
                     'student_number' => $student->student_number,
+                ];
+            }
+
+            $sectionSummaries = [];
+
+            foreach ($sections as $section) {
+                $currentCount = Student::where('section_id', $section->id)->count();
+
+                $sectionSummaries[] = [
+                    'section_id' => $section->id,
+                    'section_name' => $section->name,
+                    'capacity' => $section->capacity,
+                    'current_count' => $currentCount,
+                    'available_slots' => max(0, $section->capacity - $currentCount),
                 ];
             }
 
@@ -93,7 +107,7 @@ class StudentSectionController extends Controller
                 ],
             ]);
         });
-    
+
     }
      public function sectionsOverview(Request $request)
 {
@@ -128,43 +142,58 @@ public function transfer(Request $request)
         'to_section_id' => 'required|exists:sections,id',
     ]);
 
-    $students = Student::whereIn('id', $validated['student_ids'])->get();
     $targetSection = Section::findOrFail($validated['to_section_id']);
+    $students = Student::whereIn('id', $validated['student_ids'])->get();
 
-    $requestedCount = $students->count();
+    $wrongClass = $students->where('class_id', '!=', $targetSection->class_id);
+
+    if ($wrongClass->isNotEmpty()) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Some students do not belong to the class of the target section',
+            'data' => [
+                'target_class_id' => $targetSection->class_id,
+                'invalid_student_ids' => $wrongClass->pluck('id')->values(),
+            ],
+        ], 422);
+    }
+
+    $toTransfer = $students->where('section_id', '!=', $targetSection->id);
 
     $currentTargetCount = Student::where('section_id', $targetSection->id)->count();
     $availableSlots = $targetSection->capacity - $currentTargetCount;
 
-    if ($availableSlots < $requestedCount) {
+    if ($availableSlots < $toTransfer->count()) {
         return response()->json([
             'success' => false,
             'message' => 'Not enough capacity in target section',
             'data' => [
                 'available_slots' => $availableSlots,
-                'requested' => $requestedCount,
+                'requested' => $toTransfer->count(),
             ],
         ], 422);
     }
 
-    $updated = [];
+    return DB::transaction(function () use ($toTransfer, $targetSection) {
+        $updated = [];
 
-    foreach ($students as $student) {
-        $student->section_id = $targetSection->id;
-        $student->save();
+        foreach ($toTransfer as $student) {
+            $student->section_id = $targetSection->id;
+            $student->save();
 
-        $updated[] = [
-            'student_id' => $student->id,
-            'student_number' => $student->student_number,
-            'new_section_id' => $targetSection->id,
-            'new_section_name' => $targetSection->name,
-        ];
-    }
+            $updated[] = [
+                'student_id' => $student->id,
+                'student_number' => $student->student_number,
+                'new_section_id' => $targetSection->id,
+                'new_section_name' => $targetSection->name,
+            ];
+        }
 
-    return response()->json([
-        'success' => true,
-        'message' => 'Students transferred successfully',
-        'data' => $updated,
-    ]);
+        return response()->json([
+            'success' => true,
+            'message' => 'Students transferred successfully',
+            'data' => $updated,
+        ]);
+    });
 }
 }
