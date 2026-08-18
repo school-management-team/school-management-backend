@@ -27,13 +27,13 @@ class StageSubjectSeeder extends Seeder
 
         // الابتدائي والإعدادي: نفس المواد الأساسية
         foreach ([$primary, $middle] as $stage) {
-            $stage->subjects()->sync([$math->id, $arabic->id, $english->id,$biology->id]);
+            $stage->subjects()->syncWithoutDetaching([$math->id, $arabic->id, $english->id,$biology->id]);
         }
 
         // الثانوي العلمي: مواد علمية + عربي وإنجليزي
-        $scientific->subjects()->sync([$math->id, $physics->id, $chemistry->id, $biology->id, $arabic->id, $english->id]);
+        $scientific->subjects()->syncWithoutDetaching([$math->id, $physics->id, $chemistry->id, $biology->id, $arabic->id, $english->id]);
 
         // الثانوي الأدبي: مواد أدبية + عربي وإنجليزي (بدون فيزياء/كيمياء)
-        $literary->subjects()->sync([$arabic->id, $english->id, $history->id, $geography->id]);
+        $literary->subjects()->syncWithoutDetaching([$arabic->id, $english->id, $history->id, $geography->id]);
     }
 }

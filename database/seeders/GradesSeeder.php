@@ -17,34 +17,15 @@ class GradesSeeder extends Seeder
             return;
         }
 
+        // تنظيف الجدول قبل البدء
+        Grade::truncate();
+        
         $this->command->info('بدء إنشاء العلامات...');
-
-
-        $this->command->info('إنشاء 30 علامة مسودة...');
-        Grade::factory()
-            ->count(30)
-            ->draft()
-            ->create();
-
-
-        $this->command->info('إنشاء 20 علامة مقبولة...');
-        Grade::factory()
-            ->count(20)
-            ->approved()
-            ->create();
-
-
-        $this->command->info('إنشاء 15 علامة مرفوضة...');
-        Grade::factory()
-            ->count(15)
-            ->rejected()
-            ->create();
-
-
-        $this->command->info('إنشاء علامات لكل طالب في كل مادة...');
 
         $students = Student::with('schoolClass.sections')->get();
         $assignments = TeacherAssignment::with('subject')->get();
+
+        $createdCount = 0;
 
         foreach ($students as $student) {
             // اختيار تعيينات تناسب صف الطالب
@@ -53,39 +34,53 @@ class GradesSeeder extends Seeder
             });
 
             foreach ($studentAssignments->take(3) as $assignment) {
-                // علامة واجب
-                Grade::factory()
-                    ->draft()
-                    ->state([
+                // علامة مشاركة (participation)
+                Grade::updateOrCreate(
+                    [
                         'student_id' => $student->id,
                         'teacher_assignment_id' => $assignment->id,
-                        'type' => 'homework',
+                        'type' => 'participation',
+                        'semester' => 1,
+                    ],
+                    [
                         'value' => fake()->numberBetween(10, 20),
-                    ])->create();
+                        'status' => 'draft',
+                    ]
+                );
 
-                // علامة اختبار
-                Grade::factory()
-                    ->draft()
-                    ->state([
+                // علامة اختبار (quiz)
+                Grade::updateOrCreate(
+                    [
                         'student_id' => $student->id,
                         'teacher_assignment_id' => $assignment->id,
                         'type' => 'quiz',
+                        'semester' => 1,
+                    ],
+                    [
                         'value' => fake()->numberBetween(15, 30),
-                    ])->create();
+                        'status' => 'draft',
+                    ]
+                );
 
-                // علامة امتحان
-                Grade::factory()
-                    ->approved()
-                    ->state([
+                // علامة امتحان (exam)
+                Grade::updateOrCreate(
+                    [
                         'student_id' => $student->id,
                         'teacher_assignment_id' => $assignment->id,
                         'type' => 'exam',
+                        'semester' => 1,
+                    ],
+                    [
                         'value' => fake()->numberBetween(50, 100),
-                    ])->create();
+                        'status' => 'approved',
+                    ]
+                );
+
+                $createdCount += 3;
             }
         }
 
-        $this->command->info('تم إنشاء العلامات بنجاح!');
-        $this->command->info('إجمالي العلامات: ' . Grade::count());
+        $this->command->info(" تم إنشاء $createdCount علامة بنجاح!");
+        $this->command->info(' إجمالي العلامات في قاعدة البيانات: ' . Grade::count());
     }
 }

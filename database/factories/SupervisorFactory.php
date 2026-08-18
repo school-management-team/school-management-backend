@@ -9,6 +9,7 @@ class SupervisorFactory extends Factory
     public function definition(): array
     {
         return [
+            'user_id'=>fake(),
 
             'educational_qualification'=>'master',
 

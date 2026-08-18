@@ -8,17 +8,15 @@ use App\Models\TeacherAssignment;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 class GradeFactory extends Factory
-{
-    protected $model = Grade::class;
+{protected $model = Grade::class;
 
     public function definition(): array
     {
-        $types = ['homework', 'quiz', 'exam', 'participation', 'other'];
+        $types = [ 'quiz', 'exam', 'participation'];
         $type = fake()->randomElement($types);
 
-        // قيم مختلفة حسب نوع العلامة
-        $maxValue = match($type) {
-            'homework' => 20,
+        $maxValue = match ($type) {
+           
             'quiz' => 30,
             'exam' => 100,
             'participation' => 10,
@@ -32,29 +30,31 @@ class GradeFactory extends Factory
             'type' => $type,
             'value' => fake()->numberBetween(0, $maxValue),
             'status' => fake()->randomElement(['draft', 'approved', 'rejected']),
+            'semester' => fake()->numberBetween(1, 2),
         ];
     }
 
-
     public function draft(): self
     {
-        return $this->state(fn() => [
+        return $this->state(fn () => [
             'status' => 'draft',
+            'semester' => 1,
         ]);
     }
 
-
     public function approved(): self
     {
-        return $this->state(fn() => [
+        return $this->state(fn () => [
             'status' => 'approved',
+            'semester' => 1,
         ]);
     }
 
     public function rejected(): self
     {
-        return $this->state(fn() => [
+        return $this->state(fn () => [
             'status' => 'rejected',
+            'semester' => 1,
         ]);
     }
 }
