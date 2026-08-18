@@ -12,23 +12,17 @@ class GradeFactory extends Factory
 
     public function definition(): array
     {
-        $types = [ 'quiz', 'exam', 'participation'];
-        $type = fake()->randomElement($types);
-
-        $maxValue = match ($type) {
-           
-            'quiz' => 30,
-            'exam' => 100,
-            'participation' => 10,
-            'other' => 50,
-            default => 100,
-        };
+        // كل مكوّن من 100 — الوزن بينطبّق وقت حساب المحصّلة، مش هون
+        $type = fake()->randomElement(array_keys(config('school.grade_components')));
+        $assignment = TeacherAssignment::inRandomOrder()->first();
 
         return [
             'student_id' => Student::inRandomOrder()->first()?->id,
-            'teacher_assignment_id' => TeacherAssignment::inRandomOrder()->first()?->id,
+            'teacher_assignment_id' => $assignment?->id,
+            'subject_id' => $assignment?->subject_id,
+            'section_id' => $assignment?->section_id,
             'type' => $type,
-            'value' => fake()->numberBetween(0, $maxValue),
+            'value' => fake()->numberBetween(0, 100),
             'status' => fake()->randomElement(['draft', 'approved', 'rejected']),
             'semester' => fake()->numberBetween(1, 2),
         ];

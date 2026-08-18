@@ -25,5 +25,7 @@ public function user()
 
 
 public function recordedAttendances(): HasMany { return $this->hasMany(Attendance::class); }
+ public function recordedTeacherAttendances(): HasMany { return $this->hasMany(TeacherAttendance::class); }
+ public function assignedSubstitutions(): HasMany { return $this->hasMany(LessonSubstitution::class); }
  public function announcements(): HasMany { return $this->hasMany(Announcement::class); }
 }

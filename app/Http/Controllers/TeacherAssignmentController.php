@@ -6,11 +6,12 @@ use App\Models\Section;
 use App\Models\Subject;
 use App\Models\Teacher;
 use App\Models\TeacherAssignment;
+use App\Models\WeeklySchedule;
 use Illuminate\Http\Request;
 
 class TeacherAssignmentController extends Controller
 {
- public function index()
+    public function index()
     {
         $assignments = TeacherAssignment::with(['teacher.user', 'subject', 'section.schoolClass'])->get();
 
@@ -38,25 +39,35 @@ class TeacherAssignmentController extends Controller
             return $stageError;
         }
 
-        $assignment = TeacherAssignment::where('teacher_id', $validated['teacher_id'])
-            ->where('subject_id', $validated['subject_id'])
-            ->where('section_id', $validated['section_id'])
+        $existing = TeacherAssignment::where($validated)
+            ->with('teacher.user:id,user_name', 'subject:id,name', 'section.schoolClass')
             ->first();
 
-        if ($assignment) {
+        if ($existing) {
+            $teacherName = $existing->teacher && $existing->teacher->user
+                ? $existing->teacher->user->user_name
+                : 'المعلم';
+
+            $subjectName = $existing->subject ? $existing->subject->name : 'هذه المادة';
+            $sectionName = $existing->section ? $existing->section->name : '';
+
+            $className = $existing->section && $existing->section->schoolClass
+                ? $existing->section->schoolClass->name
+                : '';
+
             return response()->json([
-                'success' => true,
-                'message' => 'Teacher is already assigned to this subject and section',
-                'data' => $assignment->load(['teacher.user', 'subject', 'section.schoolClass']),
-            ]);
+                'success' => false,
+                'message' => "{$teacherName} مكلّف أصلاً بتدريس {$subjectName} لشعبة {$sectionName} - {$className}",
+                'data' => $existing,
+            ], 422);
         }
 
         $assignment = TeacherAssignment::create($validated);
 
         return response()->json([
             'success' => true,
-            'message' => 'Teacher assigned successfully',
-            'data' => $assignment->load(['teacher.user', 'subject', 'section.schoolClass']),
+            'message' => 'تم ربط المعلم بالمادة والشعبة بنجاح',
+            'data' => $assignment->load('teacher.user:id,user_name', 'subject:id,name', 'section.schoolClass'),
         ], 201);
     }
 
@@ -68,30 +79,44 @@ class TeacherAssignmentController extends Controller
             'section_id' => 'sometimes|exists:sections,id',
         ]);
 
-        $teacherId = $validated['teacher_id'] ?? $teacherAssignment->teacher_id;
-        $subjectId = $validated['subject_id'] ?? $teacherAssignment->subject_id;
-        $sectionId = $validated['section_id'] ?? $teacherAssignment->section_id;
+        if (count($validated) === 0) {
+            return $this->nothingToUpdate();
+        }
 
-        $stageError = $this->checkStage($teacherId, $subjectId, $sectionId);
+        $target = [
+            'teacher_id' => $validated['teacher_id'] ?? $teacherAssignment->teacher_id,
+            'subject_id' => $validated['subject_id'] ?? $teacherAssignment->subject_id,
+            'section_id' => $validated['section_id'] ?? $teacherAssignment->section_id,
+        ];
+
+        $stageError = $this->checkStage(
+            $target['teacher_id'],
+            $target['subject_id'],
+            $target['section_id']
+        );
 
         if ($stageError) {
             return $stageError;
         }
 
-        $exists = TeacherAssignment::where('teacher_id', $teacherId)
-            ->where('subject_id', $subjectId)
-            ->where('section_id', $sectionId)
+        $duplicate = TeacherAssignment::where($target)
             ->where('id', '!=', $teacherAssignment->id)
             ->exists();
 
-        if ($exists) {
+        if ($duplicate) {
             return response()->json([
                 'success' => false,
-                'message' => 'Another assignment with the same teacher, subject and section already exists',
+                'message' => 'يوجد تكليف آخر بنفس المعلم والمادة والشعبة',
             ], 422);
         }
 
-        $teacherAssignment->update($validated);
+        $teacherAssignment->fill($validated);
+
+        if (!$teacherAssignment->isDirty()) {
+            return $this->noChangesMade($teacherAssignment->load('teacher.user:id,user_name', 'subject:id,name', 'section.schoolClass'));
+        }
+
+        $teacherAssignment->save();
 
         return response()->json([
             'success' => true,
@@ -100,36 +125,73 @@ class TeacherAssignmentController extends Controller
         ]);
     }
 
-    public function destroy(TeacherAssignment $teacherAssignment)
+    public function destroy(Request $request, TeacherAssignment $teacherAssignment)
     {
+        $lessonsCount = WeeklySchedule::where('teacher_assignment_id', $teacherAssignment->id)->count();
+
+        if ($lessonsCount > 0 && !$request->boolean('force')) {
+            return response()->json([
+                'success' => false,
+                'message' => "هذا التكليف مرتبط بـ {$lessonsCount} حصة في الجدول الأسبوعي، وحذفه سيحذفها معه. أعد الطلب مع force=1 للتأكيد",
+                'data' => ['lessons_count' => $lessonsCount],
+            ], 409);
+        }
+
         $teacherAssignment->delete();
+
+        $message = 'تم حذف التكليف بنجاح';
+
+        if ($lessonsCount > 0) {
+            $message .= " وحُذفت {$lessonsCount} حصة من الجدول الأسبوعي";
+        }
 
         return response()->json([
             'success' => true,
-            'message' => 'Teacher assignment deleted successfully',
+            'message' => $message,
+            'data' => ['deleted_lessons' => $lessonsCount],
         ]);
     }
 
-    private function checkStage($teacherId, $subjectId, $sectionId)
+    private function checkStage(int $teacherId, int $subjectId, int $sectionId)
     {
-        $section = Section::with('schoolClass')->find($sectionId);
-        $stageId = $section->schoolClass->stage_id;
+        $teacher = Teacher::with('stage:id,name', 'user:id,user_name')->find($teacherId);
+        $section = Section::with('schoolClass.stage')->find($sectionId);
 
-        $teacher = Teacher::find($teacherId);
+        $class = $section ? $section->schoolClass : null;
 
-        if ($teacher->stage_id != $stageId) {
+        if (!$teacher || !$class || !$teacher->stage_id || !$class->stage_id) {
+            return null;
+        }
+
+        $stageId = $class->stage_id;
+        $classStage = $class->stage ? $class->stage->name : '-';
+
+        if ($teacher->stage_id !== $stageId) {
+            $teacherName = $teacher->user ? $teacher->user->user_name : 'المعلم';
+            $teacherStage = $teacher->stage ? $teacher->stage->name : '-';
+
             return response()->json([
                 'success' => false,
-                'message' => 'Teacher stage does not match the stage of this section',
+                'message' => "{$teacherName} مرحلته ({$teacherStage}) ولا يمكن تكليفه بصف من مرحلة ({$classStage})",
+                'data' => [
+                    'teacher_stage' => $teacherStage,
+                    'class_stage' => $classStage,
+                    'class_name' => $class->name,
+                ],
             ], 422);
         }
 
         $subject = Subject::find($subjectId);
 
-        if (!$subject->stages()->where('stages.id', $stageId)->exists()) {
+        if ($subject && !$subject->stages()->where('stages.id', $stageId)->exists()) {
             return response()->json([
                 'success' => false,
-                'message' => 'Subject is not linked to the stage of this section',
+                'message' => "المادة ({$subject->name}) غير مرتبطة بمرحلة ({$classStage})",
+                'data' => [
+                    'subject_name' => $subject->name,
+                    'class_stage' => $classStage,
+                    'class_name' => $class->name,
+                ],
             ], 422);
         }
 

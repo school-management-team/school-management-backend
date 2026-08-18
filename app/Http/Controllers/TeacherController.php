@@ -606,7 +606,7 @@ public function storeGrade(Request $request)
         'subject_id' => 'required|exists:subjects,id',
         'section_id' => 'required|exists:sections,id',
         'student_id' => 'required|exists:students,id',
-        'type' => 'required|in:participation,study,exam',
+        'type' => 'required|in:participation,quiz,exam',
         'semester' => 'required|integer|in:1,2',
         'value' => 'required|numeric|min:0|max:100',
     ]);
@@ -648,7 +648,7 @@ public function mySections(Request $request)
 public function studentsForGrading(Request $request, int $teacherAssignmentId)
 {
     $validator = Validator::make($request->all(), [
-        'type' => 'required|in:participation,study,exam',
+        'type' => 'required|in:participation,quiz,exam',
         'semester' => 'required|integer|in:1,2',
     ]);
 
@@ -675,7 +675,7 @@ public function studentsForGrading(Request $request, int $teacherAssignmentId)
 public function storeBulkGrades(Request $request, int $teacherAssignmentId)
 {
     $validator = Validator::make($request->all(), [
-        'type' => 'required|in:participation,study,exam',
+        'type' => 'required|in:participation,quiz,exam',
         'semester' => 'required|integer|in:1,2',
         'grades' => 'required|array|min:1',
         'grades.*.student_id' => 'required|exists:students,id',

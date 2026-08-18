@@ -3,84 +3,92 @@
 namespace Database\Seeders;
 
 use App\Models\Grade;
+use App\Models\GradeSubmission;
 use App\Models\Student;
 use App\Models\TeacherAssignment;
 use Illuminate\Database\Seeder;
 
 class GradesSeeder extends Seeder
 {
+   
     public function run(): void
     {
-        // التحقق من وجود بيانات قبل البدء
-        if (Student::count() === 0 || TeacherAssignment::count() === 0) {
-            $this->command->warn('لا يوجد طلاب أو تعيينات معلمين. قم بتشغيل UserSeeder أولاً.');
+        if (Student::whereNotNull('section_id')->count() === 0 || TeacherAssignment::count() === 0) {
+            $this->command?->warn('لا يوجد طلاب موزّعين على شعب أو تعيينات معلمين. شغّل UserSeeder و StudentSectionSeeder أولاً.');
             return;
         }
 
-        // تنظيف الجدول قبل البدء
-        Grade::truncate();
-        
-        $this->command->info('بدء إنشاء العلامات...');
+        GradeSubmission::query()->delete();
+        Grade::query()->delete();
 
-        $students = Student::with('schoolClass.sections')->get();
-        $assignments = TeacherAssignment::with('subject')->get();
+        $books = [];
 
-        $createdCount = 0;
+        foreach (TeacherAssignment::all() as $assignment) {
+            $key = $assignment->section_id.'-'.$assignment->subject_id;
 
-        foreach ($students as $student) {
-            // اختيار تعيينات تناسب صف الطالب
-            $studentAssignments = $assignments->filter(function ($assignment) use ($student) {
-                return $assignment->section->class_id === $student->class_id;
-            });
-
-            foreach ($studentAssignments->take(3) as $assignment) {
-                // علامة مشاركة (participation)
-                Grade::updateOrCreate(
-                    [
-                        'student_id' => $student->id,
-                        'teacher_assignment_id' => $assignment->id,
-                        'type' => 'participation',
-                        'semester' => 1,
-                    ],
-                    [
-                        'value' => fake()->numberBetween(10, 20),
-                        'status' => 'draft',
-                    ]
-                );
-
-                // علامة اختبار (quiz)
-                Grade::updateOrCreate(
-                    [
-                        'student_id' => $student->id,
-                        'teacher_assignment_id' => $assignment->id,
-                        'type' => 'quiz',
-                        'semester' => 1,
-                    ],
-                    [
-                        'value' => fake()->numberBetween(15, 30),
-                        'status' => 'draft',
-                    ]
-                );
-
-                // علامة امتحان (exam)
-                Grade::updateOrCreate(
-                    [
-                        'student_id' => $student->id,
-                        'teacher_assignment_id' => $assignment->id,
-                        'type' => 'exam',
-                        'semester' => 1,
-                    ],
-                    [
-                        'value' => fake()->numberBetween(50, 100),
-                        'status' => 'approved',
-                    ]
-                );
-
-                $createdCount += 3;
+            if (!isset($books[$key])) {
+                $books[$key] = $assignment;
             }
         }
 
-        $this->command->info(" تم إنشاء $createdCount علامة بنجاح!");
-        $this->command->info(' إجمالي العلامات في قاعدة البيانات: ' . Grade::count());
+        $grades = 0;
+        $submissions = 0;
+        $index = 0;
+
+        foreach ($books as $assignment) {
+            $students = Student::where('section_id', $assignment->section_id)->get();
+
+            if ($students->isEmpty()) {
+                continue;
+            }
+
+            $partial = $index % 4 === 0;
+
+            foreach ($students as $student) {
+                foreach (['participation' => [50, 100], 'quiz' => [40, 100], 'exam' => [35, 100]] as $type => $range) {
+                    if ($partial && $type === 'exam') {
+                        continue;
+                    }
+
+                    Grade::updateOrCreate(
+                        [
+                            'student_id' => $student->id,
+                            'subject_id' => $assignment->subject_id,
+                            'type' => $type,
+                            'semester' => 1,
+                        ],
+                        [
+                            'section_id' => $assignment->section_id,
+                            'teacher_assignment_id' => $assignment->id,
+                            'value' => fake()->numberBetween(...$range),
+                            'status' => 'draft',
+                        ]
+                    );
+
+                    $grades++;
+                }
+            }
+
+            if ($partial) {
+                continue;
+            }
+
+
+            GradeSubmission::updateOrCreate(
+                [
+                    'section_id' => $assignment->section_id,
+                    'subject_id' => $assignment->subject_id,
+                    'semester' => 1,
+                ],
+                [
+                    'teacher_assignment_id' => $assignment->id,
+                    'status' => $index % 3 === 0 ? 'submitted' : 'approved',
+                ]
+            );
+
+            $submissions++;
+        }
+
+        $this->command?->info("تم إنشاء {$grades} علامة ضمن {$submissions} دفتر مكتمل.");
     }
 }

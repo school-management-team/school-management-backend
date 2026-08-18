@@ -36,6 +36,7 @@ class AdminAcademicController extends Controller
                 'student_number' => $a->student->student_number,
                 'status' => $a->status,
                 'excuse' => $a->excuse,
+                'left_at' => $a->left_at,
             ]);
 
         return response()->json([
@@ -282,14 +283,17 @@ class AdminAcademicController extends Controller
 
     $semester = $request->semester;
 
+    // مادة وحدة = صف واحد، حتى لو بياخدها أكتر من معلم لنفس الشعبة
     $teacherAssignments = TeacherAssignment::where('section_id', $student->section_id)
         ->with('subject')
-        ->get();
+        ->get()
+        ->unique('subject_id');
 
     $report = [];
 
     foreach ($teacherAssignments as $assignment) {
-        $submission = GradeSubmission::where('teacher_assignment_id', $assignment->id)
+        $submission = GradeSubmission::where('section_id', $assignment->section_id)
+            ->where('subject_id', $assignment->subject_id)
             ->where('semester', $semester)
             ->where('status', 'approved')
             ->first();

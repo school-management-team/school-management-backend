@@ -16,4 +16,46 @@ return [
         11 => ['start' => 11000, 'end' => 11999, 'prefix' => '11'],
         12 => ['start' => 12000, 'end' => 12999, 'prefix' => '12'],
     ],
+
+    'school_days' => ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday'],
+
+    'semesters' => [1, 2],
+
+    /*
+     | حالات الحضور. الطالب عندو حالة زيادة (خروج مبكر) لأنه بيغادر المدرسة
+     | أثناء الدوام، والمعلم لأ. لازم تطابق enum العمود status بالجدولين.
+     */
+    'attendance_statuses' => [
+        'student' => ['present', 'absent', 'late', 'excused', 'early_leave'],
+        'teacher' => ['present', 'absent', 'late', 'excused'],
+    ],
+
+    /** الحالات اللي بتهم ولي الأمر (اللي مش حضور كامل) */
+    'attendance_concerns' => ['absent', 'late', 'excused', 'early_leave'],
+
+    /*
+     | مكوّنات العلامة وأوزانها — مصدر واحد بدل ما تكون الأسماء والأوزان
+     | مبعترة بين GradeService والكنترولرات والـ migration.
+     | المفاتيح لازم تطابق enum العمود grades.type بالضبط.
+     */
+    'grade_components' => [
+        'participation' => ['label' => 'المشاركة', 'weight' => 20],
+        'quiz' => ['label' => 'الأعمال الفصلية', 'weight' => 30],
+        'exam' => ['label' => 'الامتحان النهائي', 'weight' => 50],
+    ],
+
+    /*
+     | تعريف الحصص وأوقاتها. الأوقات بتتقرأ من هون وقت إنشاء الجدول الأسبوعي،
+     | حتى ما يصير اختلاف بتوقيت نفس الحصة بين معلم ومعلم.
+     */
+    'periods' => [
+        1 => ['start' => '08:00:00', 'end' => '08:45:00', 'type' => 'class'],
+        2 => ['start' => '08:45:00', 'end' => '09:30:00', 'type' => 'class'],
+        3 => ['start' => '09:30:00', 'end' => '10:15:00', 'type' => 'class'],
+        4 => ['start' => '10:15:00', 'end' => '10:35:00', 'type' => 'break'],
+        5 => ['start' => '10:35:00', 'end' => '11:20:00', 'type' => 'class'],
+        6 => ['start' => '11:20:00', 'end' => '12:05:00', 'type' => 'class'],
+        7 => ['start' => '12:05:00', 'end' => '12:50:00', 'type' => 'class'],
+        8 => ['start' => '12:50:00', 'end' => '13:35:00', 'type' => 'class'],
+    ],
 ];
