@@ -3,12 +3,115 @@
 namespace App\Services;
 
 use App\Models\LessonPlan;
+use App\Models\LessonSubstitution;
 use App\Models\Teacher;
 use App\Models\WeeklySchedule;
 
 class WeeklyScheduleService
 {
-    private array $days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday'];
+    private array $days;
+
+    public function __construct()
+    {
+        $this->days = config('school.school_days');
+    }
+
+    /**
+     * جدول شعبة كامل كشبكة أيام × حصص. بيستعملها الموجّه وولي الأمر —
+     * نفس المصدر حتى ما يختلف اللي بيشوفوه.
+     */
+    public function sectionWeek(int $sectionId): array
+    {
+        $lessons = WeeklySchedule::where('section_id', $sectionId)
+            ->with('teacher.user:id,user_name', 'teacherAssignment.subject:id,name')
+            ->get();
+
+        // منرتّبهم بمفتاح "اليوم-رقم الحصة" حتى نلاقي حصة أي خانة بسرعة
+        $bySlot = [];
+
+        foreach ($lessons as $lesson) {
+            $bySlot[$lesson->day_of_week.'-'.$lesson->period_number] = $lesson;
+        }
+
+        $grid = [];
+
+        foreach ($this->days as $day) {
+            $slots = [];
+
+            foreach (config('school.periods') as $number => $period) {
+                $slot = [
+                    'period_number' => $number,
+                    'start_time' => $period['start'],
+                    'end_time' => $period['end'],
+                    'type' => $period['type'],
+                ];
+
+                $key = $day.'-'.$number;
+
+                // الخانة الفاضية بتضل بمعلوماتها الأساسية بدون مادة ومعلم
+                if (isset($bySlot[$key])) {
+                    $lesson = $bySlot[$key];
+
+                    $slot['weekly_schedule_id'] = $lesson->id;
+                    $slot['subject'] = $lesson->teacherAssignment ? $lesson->teacherAssignment->subject->name : null;
+                    $slot['teacher_id'] = $lesson->teacher_id;
+                    $slot['teacher_name'] = $lesson->teacher ? $lesson->teacher->user->user_name : null;
+                }
+
+                $slots[] = $slot;
+            }
+
+            $grid[$day] = $slots;
+        }
+
+        return ['grid' => $grid, 'filled_slots' => $lessons->count()];
+    }
+
+    /**
+     * حصص الشعبة بيوم فعلي — مع المعلم البديل إذا كان في تعويض مسجّل.
+     * هذا اللي يهم ولي الأمر: مين رح يعطي ابنه اليوم فعلياً.
+     */
+    public function sectionDay(int $sectionId, string $dayOfWeek, string $date): array
+    {
+        $lessons = WeeklySchedule::where('section_id', $sectionId)
+            ->where('day_of_week', $dayOfWeek)
+            ->where('type', 'class')
+            ->with('teacher.user:id,user_name', 'teacherAssignment.subject:id,name')
+            ->orderBy('period_number')
+            ->get();
+
+        $substitutions = LessonSubstitution::forDate($date)
+            ->active()
+            ->whereIn('weekly_schedule_id', $lessons->pluck('id'))
+            ->with('substituteTeacher.user:id,user_name')
+            ->get()
+            ->keyBy('weekly_schedule_id');
+
+        $result = [];
+
+        foreach ($lessons as $lesson) {
+            $substitution = $substitutions->get($lesson->id);
+
+            $substituteName = null;
+
+            if ($substitution && $substitution->substituteTeacher) {
+                $substituteName = $substitution->substituteTeacher->user->user_name;
+            }
+
+            $result[] = [
+                'weekly_schedule_id' => $lesson->id,
+                'period_number' => $lesson->period_number,
+                'start_time' => $lesson->start_time,
+                'end_time' => $lesson->end_time,
+                'subject' => $lesson->teacherAssignment ? $lesson->teacherAssignment->subject->name : null,
+                'teacher_name' => $lesson->teacher ? $lesson->teacher->user->user_name : null,
+                'is_substituted' => $substitution !== null,
+                'substitute_teacher_name' => $substituteName,
+            ];
+        }
+
+        return $result;
+    }
 
     // جدول يوم واحد، مع خطة الدرس الخاصة بذلك التاريخ بالضبط
 public function dayOf(Teacher $teacher, string $dayOfWeek, string $date)

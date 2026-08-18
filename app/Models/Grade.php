@@ -10,9 +10,14 @@ class Grade extends Model
     use HasFactory;
 public $timestamps = false;
     protected $fillable = [
-        'student_id', 'teacher_assignment_id', 'type', 'semester', 'value', 'status',
+        'student_id', 'teacher_assignment_id', 'subject_id', 'section_id',
+        'type', 'semester', 'value', 'status',
     ];
 
     public function student(): BelongsTo { return $this->belongsTo(Student::class); }
+    public function subject(): BelongsTo { return $this->belongsTo(Subject::class); }
+    public function section(): BelongsTo { return $this->belongsTo(Section::class); }
+
+    /** مرجع لمين رصد العلامة — مش مفتاح الدفتر (الدفتر = شعبة + مادة) */
     public function teacherAssignment(): BelongsTo { return $this->belongsTo(TeacherAssignment::class); }
 }

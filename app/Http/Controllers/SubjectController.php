@@ -55,6 +55,10 @@ class SubjectController extends Controller
             'stage_ids.*' => 'required_with:stage_ids|exists:stages,id',
         ]);
 
+        if (count($validated) === 0) {
+            return $this->nothingToUpdate();
+        }
+
         return DB::transaction(function () use ($validated, $subject) {
             $subject->update([
                 'name' => $validated['name'] ?? $subject->name,

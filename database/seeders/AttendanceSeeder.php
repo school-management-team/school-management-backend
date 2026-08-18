@@ -4,209 +4,159 @@ namespace Database\Seeders;
 
 use App\Models\Attendance;
 use App\Models\Student;
-use App\Models\Section;
 use App\Models\Supervisor;
-use Illuminate\Database\Seeder;
+use App\Models\Teacher;
+use App\Models\TeacherAttendance;
+use App\Services\SchoolCalendarService;
 use Carbon\Carbon;
+use Illuminate\Database\Seeder;
 
 class AttendanceSeeder extends Seeder
 {
+    
     public function run(): void
     {
-        if (Student::count() === 0 || Section::count() === 0) {
-            $this->command->warn('لا يوجد طلاب أو شعب. قم بتشغيل UserSeeder أولاً.');
+        $students = Student::whereNotNull('section_id')->get();
+
+        if ($students->isEmpty()) {
+            $this->command?->warn('لا يوجد طلاب موزّعين على شعب. شغّل StudentSectionSeeder أولاً.');
             return;
         }
 
-        $this->command->info('بدء إنشاء سجلات الحضور...');
+        $supervisor = Supervisor::first();
 
-        $supervisorId = Supervisor::first()?->id ?? 1;
-        $students = Student::whereNotNull('section_id')->take(10)->get();
-        
-if ($students->isEmpty()) {
-    $this->command->warn('لا يوجد طلاب مرتبطون بشعب. قم أولًا بتوزيع الطلاب على الشعب.');
-    return;
-}
-        $statuses = ['present', 'present', 'present', 'present', 'absent', 'present', 'late', 'present', 'excused', 'present'];
-        $excuses = ['مرض', 'عذر عائلي', 'ظروف طارئة', 'موعد طبي', null, null, null];
-
-
-        // 1. إنشاء 50 سجل حضور عشوائي (تجنب التكرار)
-
-        $this->command->info('إنشاء 50 سجل حضور عشوائي...');
-
-        $existingRecords = [];
-        $createdCount = 0;
-
-        for ($i = 0; $i < 100; $i++) {
-            if ($createdCount >= 50) break;
-
-            $student = $students->random();
-            $date = Carbon::now()->subDays(rand(1, 30))->format('Y-m-d');
-
-            // التحقق من عدم وجود سجل مكرر
-            $key = $student->id . '-' . $date;
-
-            if (in_array($key, $existingRecords)) {
-                continue;
-            }
-
-            // التحقق من قاعدة البيانات
-            $existing = Attendance::where('student_id', $student->id)
-                ->where('date', $date)
-                ->first();
-
-            if ($existing) {
-                $existingRecords[] = $key;
-                continue;
-            }
-
-            $existingRecords[] = $key;
-            $createdCount++;
-
-            $status = $statuses[array_rand($statuses)];
-
-            Attendance::create([
-                'student_id' => $student->id,
-                'section_id' => $student->section_id,
-                'supervisor_id' => $supervisorId,
-                'date' => $date,
-                'status' => $status,
-                'excuse' => $status === 'absent' ? $excuses[array_rand($excuses)] : null,
-            ]);
+        if (!$supervisor) {
+            $this->command?->warn('لا يوجد موجّه. شغّل SupervisorSeeder أولاً.');
+            return;
         }
 
-        // 2. سجلات حضور لشهر كامل لطلاب محددين
+        Attendance::query()->delete();
 
-        $this->command->info('إنشاء سجلات حضور لشهر كامل...');
+        $calendar = app(SchoolCalendarService::class);
 
-        $students = Student::with('section')->whereNotNull('section_id')->take(5)->get();
-        if ($students->isEmpty()) {
-    $this->command->warn('لا يوجد طلاب مرتبطون بشعب لإنشاء سجلات شهر كامل.');
-    return;
-}
-        $startDate = Carbon::now()->startOfMonth();
-        $endDate = Carbon::now()->endOfMonth();
+ 
+        $schoolDays = [];
+        $cursor = Carbon::today();
+
+        while (count($schoolDays) < 30) {
+            $date = $cursor->toDateString();
+
+            if ($calendar->isSchoolDay($date)) {
+                $schoolDays[] = $date;
+            }
+
+            $cursor->subDay();
+
+            
+            if ($cursor->lt(Carbon::today()->subDays(120))) {
+                break;
+            }
+        }
+
+        $created = 0;
+        $counts = [];
 
         foreach ($students as $student) {
-            $currentDate = clone $startDate;
+            foreach ($schoolDays as $date) {
+                $status = $this->pickStatus();
 
-            while ($currentDate <= $endDate) {
-                // تخطي أيام الجمعة والسبت
-                if ($currentDate->dayOfWeek === Carbon::FRIDAY || $currentDate->dayOfWeek === Carbon::SATURDAY) {
-                    $currentDate->addDay();
-                    continue;
-                }
+                Attendance::create([
+                    'student_id' => $student->id,
+                    'section_id' => $student->section_id,
+                    'supervisor_id' => $supervisor->id,
+                    'date' => $date,
+                    'status' => $status,
+                    'excuse' => in_array($status, ['absent', 'excused']) ? $this->pickExcuse() : null,
+                    'left_at' => $status === 'early_leave' ? '11:30' : null,
+                ]);
 
-                $dateStr = $currentDate->format('Y-m-d');
-
-                // التحقق من عدم وجود سجل مسبق
-                $existing = Attendance::where('student_id', $student->id)
-                    ->where('date', $dateStr)
-                    ->first();
-
-                if (!$existing) {
-                    $status = $this->getRealisticStatus($currentDate, $student->id);
-
-                    Attendance::create([
-                        'student_id' => $student->id,
-                        'section_id' => $student->section_id,
-                        'supervisor_id' => $supervisorId,
-                        'date' => $dateStr,
-                        'status' => $status,
-                        'excuse' => $status === 'absent' ? $this->getRandomExcuse() : null,
-                    ]);
-                }
-
-                $currentDate->addDay();
-            }
-
-            $this->command->line("تم إنشاء سجلات للطالب {$student->id}");
-        }
-
-
-        //  سجلات حضور لشعبة محددة (للاختبار)
-
-        $this->command->info('إنشاء سجلات حضور لشعبة محددة...');
-
-        $section = Section::whereHas('students')->inRandomOrder()->first();
-
-if (!$section) {
-    $this->command->warn('لا توجد أي شعبة تحتوي على طلاب.');
-    return;
-}
-
-$studentsInSection = Student::where('section_id', $section->id)->take(3)->get();
-        $dates = ['2026-07-20', '2026-07-21', '2026-07-22', '2026-07-23', '2026-07-24'];
-
-        foreach ($studentsInSection as $student) {
-            foreach ($dates as $date) {
-                // التحقق من عدم وجود سجل مسبق
-                $existing = Attendance::where('student_id', $student->id)
-                    ->where('date', $date)
-                    ->first();
-
-                if (!$existing) {
-                    $status = $this->getStatusForDate($date);
-                    Attendance::create([
-                        'student_id' => $student->id,
-                        'section_id' => $section->id,
-                        'supervisor_id' => $supervisorId,
-                        'date' => $date,
-                        'status' => $status,
-                        'excuse' => $status === 'absent' ? 'مرض' : null,
-                    ]);
-                }
+                $counts[$status] = ($counts[$status] ?? 0) + 1;
+                $created++;
             }
         }
 
-        $this->command->info('تم إنشاء سجلات الحضور بنجاح!');
-        $this->command->info('إجمالي السجلات: ' . Attendance::count());
+        $summary = [];
+
+        foreach ($counts as $status => $count) {
+            $summary[] = $status.': '.$count;
+        }
+
+        $this->command?->info("سجلات حضور الطلاب: {$created} على ".count($schoolDays).' يوم دوام');
+        $this->command?->line('  '.implode(' | ', $summary));
+
+        $this->seedTeachers($schoolDays, $supervisor->id);
     }
 
-    private function getRealisticStatus($date, int $studentId): string
+    /**
+     * حضور المعلمين — بدونه ما بيشتغل نظام التعويض إطلاقاً، لأنه بيعتمد
+     * عليه ليعرف مين غايب (حصصه بدها تعويض) ومين موجود بالمدرسة (بيقدر يعوّض).
+     */
+    private function seedTeachers(array $schoolDays, int $supervisorId): void
     {
-        $dayOfWeek = $date->dayOfWeek;
+        $teachers = Teacher::all();
 
-        if ($dayOfWeek === Carbon::SUNDAY || $dayOfWeek === Carbon::THURSDAY) {
-            $absentChance = 30;
-        } else {
-            $absentChance = 10;
+        if ($teachers->isEmpty()) {
+            return;
         }
 
-        $studentAbsentFactor = ($studentId % 3 === 0) ? 20 : 0;
-        $totalAbsentChance = $absentChance + $studentAbsentFactor;
+        TeacherAttendance::query()->delete();
 
-        $random = rand(1, 100);
+        $created = 0;
+        $absent = 0;
 
-        if ($random <= 5) {
-            return 'excused';
-        } elseif ($random <= 10) {
-            return 'late';
-        } elseif ($random <= 10 + $totalAbsentChance) {
+        foreach ($schoolDays as $index => $date) {
+            foreach ($teachers as $position => $teacher) {
+                // منخلّي معلم واحد غايب كل يوم بالتناوب، والباقي حاضرين
+                $isAway = ($index + $position) % $teachers->count() === 0;
+                $status = $isAway ? 'absent' : 'present';
+
+                TeacherAttendance::create([
+                    'teacher_id' => $teacher->id,
+                    'supervisor_id' => $supervisorId,
+                    'date' => $date,
+                    'status' => $status,
+                    'excuse' => $isAway ? 'عذر صحي' : null,
+                ]);
+
+                $created++;
+
+                if ($isAway) {
+                    $absent++;
+                }
+            }
+        }
+
+        $this->command?->info("سجلات حضور المعلمين: {$created} (منها {$absent} غياب)");
+    }
+
+    
+    private function pickStatus(): string
+    {
+        $roll = rand(1, 100);
+
+        if ($roll <= 78) {
+            return 'present';
+        }
+
+        if ($roll <= 87) {
             return 'absent';
         }
 
-        return 'present';
+        if ($roll <= 93) {
+            return 'late';
+        }
+
+        if ($roll <= 97) {
+            return 'excused';
+        }
+
+        return 'early_leave';
     }
 
-    private function getStatusForDate(string $date): string
-    {
-        $statuses = [
-            '2026-07-20' => 'present',
-            '2026-07-21' => 'present',
-            '2026-07-22' => 'absent',
-            '2026-07-23' => 'late',
-            '2026-07-24' => 'present',
-        ];
-
-        return $statuses[$date] ?? 'present';
-    }
-
-    private function getRandomExcuse(): string
+    private function pickExcuse(): string
     {
         $excuses = ['مرض', 'عذر عائلي', 'ظروف طارئة', 'موعد طبي', 'سفر'];
+
         return $excuses[array_rand($excuses)];
     }
 }
-

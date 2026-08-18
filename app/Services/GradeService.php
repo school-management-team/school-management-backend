@@ -10,9 +10,17 @@ use App\Models\TeacherAssignment;
 
 class GradeService
 {
-    private const PARTICIPATION_WEIGHT = 20;
-    private const STUDY_WEIGHT = 30;
-    private const EXAM_WEIGHT = 50;
+    // أسماء مكوّنات العلامة وأوزانها من config/school.php (مطابقة لـ enum grades.type)
+    public function components(): array
+    {
+        return config('school.grade_components');
+    }
+
+    // أسماء المكوّنات بس: participation, quiz, exam
+    public function componentTypes(): array
+    {
+        return array_keys($this->components());
+    }
 
     // كل الشعب اللي يدرّسها المعلم (لبطاقات الواجهة)
     public function sectionsForTeacher(Teacher $teacher)
@@ -44,10 +52,17 @@ class GradeService
             ->exists();
     }
 
-    // هل هذي الشعبة مقفلة (مرفوعة/معتمدة) لهذا الفصل؟
+    /*
+     | دفتر العلامات مفتاحه (شعبة + مادة) — مش التكليف.
+     | التكليف بيحدد الصلاحية بس (هل بتدرّس هالمادة لهالشعبة؟)، فلو أكتر من
+     | معلم بياخد نفس المادة لنفس الشعبة بيشتغلوا كلهم على نفس الدفتر.
+     */
+
+    // هل هذي المادة مقفلة (مرفوعة/معتمدة) لهذه الشعبة بهذا الفصل؟
     public function isLocked(TeacherAssignment $teacherAssignment, int $semester): bool
     {
-        return GradeSubmission::where('teacher_assignment_id', $teacherAssignment->id)
+        return GradeSubmission::where('section_id', $teacherAssignment->section_id)
+            ->where('subject_id', $teacherAssignment->subject_id)
             ->where('semester', $semester)
             ->whereIn('status', ['submitted', 'approved'])
             ->exists();
@@ -62,14 +77,19 @@ class GradeService
             return false;
         }
 
-        foreach ($studentIds as $studentId) {
-            $typesEntered = Grade::where('teacher_assignment_id', $teacherAssignment->id)
-                ->where('student_id', $studentId)
-                ->where('semester', $semester)
-                ->pluck('type');
+        $entered = Grade::where('subject_id', $teacherAssignment->subject_id)
+            ->where('semester', $semester)
+            ->whereIn('student_id', $studentIds)
+            ->get()
+            ->groupBy('student_id');
 
-            if (!$typesEntered->contains('participation') || !$typesEntered->contains('study') || !$typesEntered->contains('exam')) {
-                return false;
+        foreach ($studentIds as $studentId) {
+            $types = $entered->get($studentId, collect())->pluck('type');
+
+            foreach ($this->componentTypes() as $type) {
+                if (!$types->contains($type)) {
+                    return false;
+                }
             }
         }
 
@@ -85,12 +105,16 @@ class GradeService
 
         $grade = Grade::updateOrCreate(
             [
-                'teacher_assignment_id' => $teacherAssignment->id,
                 'student_id' => $data['student_id'],
+                'subject_id' => $teacherAssignment->subject_id,
                 'type' => $data['type'],
                 'semester' => $data['semester'],
             ],
-            ['value' => $data['value']]
+            [
+                'section_id' => $teacherAssignment->section_id,
+                'teacher_assignment_id' => $teacherAssignment->id,
+                'value' => $data['value'],
+            ]
         );
 
         $this->autoSubmitIfComplete($teacherAssignment, $data['semester']);
@@ -105,9 +129,10 @@ class GradeService
             ->with('user:id,user_name')
             ->get();
 
-        $existingGrades = Grade::where('teacher_assignment_id', $teacherAssignment->id)
+        $existingGrades = Grade::where('subject_id', $teacherAssignment->subject_id)
             ->where('type', $type)
             ->where('semester', $semester)
+            ->whereIn('student_id', $students->pluck('id'))
             ->pluck('value', 'student_id');
 
         foreach ($students as $student) {
@@ -127,12 +152,16 @@ class GradeService
         foreach ($grades as $entry) {
             Grade::updateOrCreate(
                 [
-                    'teacher_assignment_id' => $teacherAssignment->id,
                     'student_id' => $entry['student_id'],
+                    'subject_id' => $teacherAssignment->subject_id,
                     'type' => $type,
                     'semester' => $semester,
                 ],
-                ['value' => $entry['value']]
+                [
+                    'section_id' => $teacherAssignment->section_id,
+                    'teacher_assignment_id' => $teacherAssignment->id,
+                    'value' => $entry['value'],
+                ]
             );
         }
 
@@ -144,7 +173,7 @@ class GradeService
     {
         $students = $teacherAssignment->section->students;
 
-        $grades = Grade::where('teacher_assignment_id', $teacherAssignment->id)
+        $grades = Grade::where('subject_id', $teacherAssignment->subject_id)
             ->where('semester', $semester)
             ->whereIn('student_id', $students->pluck('id'))
             ->get()
@@ -155,22 +184,21 @@ class GradeService
         foreach ($students as $student) {
             $studentGrades = $grades->get($student->id, collect());
 
-            $participation = $studentGrades->firstWhere('type', 'participation')?->value;
-            $study = $studentGrades->firstWhere('type', 'study')?->value;
-            $exam = $studentGrades->firstWhere('type', 'exam')?->value;
-
-            $total = ($participation * self::PARTICIPATION_WEIGHT / 100)
-                + ($study * self::STUDY_WEIGHT / 100)
-                + ($exam * self::EXAM_WEIGHT / 100);
-
-            $results[] = [
+            $row = [
                 'student_id' => $student->id,
                 'student_name' => $student->user->user_name,
-                'participation_value' => $participation,
-                'study_value' => $study,
-                'exam_value' => $exam,
-                'total_value' => round($total, 2),
             ];
+
+            $total = 0;
+
+            foreach ($this->components() as $type => $component) {
+                $value = $studentGrades->firstWhere('type', $type)?->value;
+                $row["{$type}_value"] = $value;
+                $total += $value * $component['weight'] / 100;
+            }
+
+            $row['total_value'] = round($total, 2);
+            $results[] = $row;
         }
 
         return $results;
@@ -188,8 +216,16 @@ class GradeService
         }
 
         GradeSubmission::updateOrCreate(
-            ['teacher_assignment_id' => $teacherAssignment->id, 'semester' => $semester],
-            ['status' => 'submitted', 'approved_by' => null]
+            [
+                'section_id' => $teacherAssignment->section_id,
+                'subject_id' => $teacherAssignment->subject_id,
+                'semester' => $semester,
+            ],
+            [
+                'teacher_assignment_id' => $teacherAssignment->id,
+                'status' => 'submitted',
+                'approved_by' => null,
+            ]
         );
 
         return true;

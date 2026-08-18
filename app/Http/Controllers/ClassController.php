@@ -73,6 +73,10 @@ public function update(Request $request, SchoolClass $schoolClass)
         ], 422);
     }
 
+    if (count($validator->validated()) === 0) {
+        return $this->nothingToUpdate();
+    }
+
     $stageId = $request->stage_id ?? $schoolClass->stage_id;
     $gradeOrder = $request->grade_order ?? $schoolClass->grade_order;
 

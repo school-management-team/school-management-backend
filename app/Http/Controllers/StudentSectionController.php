@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\SchoolClass;
 use App\Models\Section;
 use App\Models\Student;
 use Illuminate\Http\Request;
@@ -95,31 +96,70 @@ class StudentSectionController extends Controller
         });
     
     }
-     public function sectionsOverview(Request $request)
-{
-    $validated = $request->validate([
-        'class_id' => 'required|exists:classes,id',
-    ]);
+    /**
+     * الصف مع كل شعبه ومعلوماتها.
+     *
+     * لو الصف ما إلو شعب منرجّع نجاح مع مصفوفة فاضية — الصف موجود وهاي
+     * نتيجة صحيحة مش خطأ. بس منرجّع معلومات الصف والعدّادات كمان، حتى
+     * تقدر الواجهة تعرض "الصف كذا — ما فيه شعب" بدل شاشة فاضية.
+     */
+    public function sectionsOverview(Request $request)
+    {
+        $request->validate([
+            'class_id' => 'required|exists:classes,id',
+        ]);
 
-    $sections = Section::where('class_id', $validated['class_id'])
-        ->withCount('students')
-        ->orderBy('id')
-        ->get()
-        ->map(function ($section) {
-            return [
+        $class = SchoolClass::with('stage:id,name')->findOrFail($request->class_id);
+
+        $found = Section::where('class_id', $class->id)
+            ->withCount('students')
+            ->orderBy('name')
+            ->get();
+
+        $sections = [];
+        $totalCapacity = 0;
+        $totalStudents = 0;
+
+        foreach ($found as $section) {
+            $available = max(0, $section->capacity - $section->students_count);
+
+            $sections[] = [
                 'id' => $section->id,
                 'name' => $section->name,
                 'capacity' => $section->capacity,
                 'students_count' => $section->students_count,
-                'available_slots' => max(0, $section->capacity - $section->students_count),
+                'available_slots' => $available,
+                'is_full' => $available === 0,
             ];
-        });
 
-    return response()->json([
-        'success' => true,
-        'data' => $sections,
-    ]);
-}
+            $totalCapacity += $section->capacity;
+            $totalStudents += $section->students_count;
+        }
+
+        if (count($sections) === 0) {
+            $message = 'لا توجد شعب في هذا الصف بعد';
+        } else {
+            $message = 'عدد الشعب: '.count($sections);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => $message,
+            'data' => [
+                'class' => [
+                    'id' => $class->id,
+                    'name' => $class->name,
+                    'grade_order' => $class->grade_order,
+                    'stage' => $class->stage ? $class->stage->name : null,
+                ],
+                'sections' => $sections,
+                'total' => count($sections),
+                'total_capacity' => $totalCapacity,
+                'total_students' => $totalStudents,
+                'available_slots' => max(0, $totalCapacity - $totalStudents),
+            ],
+        ]);
+    }
 public function transfer(Request $request)
 {
     $validated = $request->validate([
