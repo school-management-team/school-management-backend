@@ -1,15 +1,19 @@
 <?php
-
 namespace App\Services;
 
 use App\Models\Assignment;
+use App\Models\Attendance;
+use App\Models\Student;
+use App\Models\StudentAssignmentStatus;
 use App\Models\Teacher;
 use App\Models\TeacherAssignment;
 
-
 class AssignmentService
 {
-    // المواد اللي يدرّسها المعلم (لتعبئة قائمة "اختر المادة")
+    private const URGENT_DAYS_THRESHOLD = 2;
+
+    // ==================== توابع المعلم (بدون تغيير) ====================
+
     public function subjectsForTeacher(Teacher $teacher)
     {
         return $teacher->assignments()
@@ -20,7 +24,6 @@ class AssignmentService
             ->values();
     }
 
-    // الشعب اللي يدرّس فيها المعلم مادة معينة (لتعبئة "الصف والشعبة" بعد اختيار المادة)
     public function sectionsForSubject(Teacher $teacher, int $subjectId)
     {
         return $teacher->assignments()
@@ -32,7 +35,6 @@ class AssignmentService
             ->values();
     }
 
-    // التحقق من أن المعلم فعلاً يدرّس هذه المادة لهذه الشعبة
     public function findTeacherAssignment(Teacher $teacher, int $subjectId, int $sectionId): ?TeacherAssignment
     {
         return TeacherAssignment::where('teacher_id', $teacher->id)
@@ -54,27 +56,190 @@ class AssignmentService
         ]);
     }
 
-    // كل الواجبات اللي أنشأها المعلم
     public function list(Teacher $teacher, array $filters)
     {
-        $query = Assignment::whereHas('teacherAssignment', function ($teacherAssignmentQuery) use ($teacher) {
-            $teacherAssignmentQuery->where('teacher_id', $teacher->id);
+        $query = Assignment::whereHas('teacherAssignment', function ($q) use ($teacher) {
+            $q->where('teacher_id', $teacher->id);
         });
 
         if (!empty($filters['section_id'])) {
-            $query->whereHas('teacherAssignment', function ($teacherAssignmentQuery) use ($filters) {
-                $teacherAssignmentQuery->where('section_id', $filters['section_id']);
-            });
+            $query->whereHas('teacherAssignment', fn ($q) => $q->where('section_id', $filters['section_id']));
         }
 
         if (!empty($filters['subject_id'])) {
-            $query->whereHas('teacherAssignment', function ($teacherAssignmentQuery) use ($filters) {
-                $teacherAssignmentQuery->where('subject_id', $filters['subject_id']);
-            });
+            $query->whereHas('teacherAssignment', fn ($q) => $q->where('subject_id', $filters['subject_id']));
         }
 
         return $query->with('teacherAssignment.subject:id,name', 'teacherAssignment.section.schoolClass:id,name')
             ->latest()
             ->paginate($filters['per_page'] ?? 15);
     }
+
+    // ==================== توابع الطالب ====================
+
+    // واجبات مستحقة اليوم (للوحة التحكم الرئيسية)
+    public function todayForStudent(Student $student)
+    {
+        if (!$student->section_id) {
+            return collect();
+        }
+
+        return Assignment::whereHas('teacherAssignment', fn ($q) => $q->where('section_id', $student->section_id))
+            ->whereDate('due_date', now()->toDateString())
+            ->with('teacherAssignment.subject:id,name')
+            ->get();
+    }
+
+    // كل واجبات الطالب مع حالته الشخصية + شارة "هام جداً" الديناميكية
+   public function listForStudentWithStatus(Student $student, array $filters = [])
+{
+    if (!$student->section_id) {
+        return collect();
+    }
+
+    $query = Assignment::whereHas('teacherAssignment', fn ($q) => $q->where('section_id', $student->section_id));
+
+    if (!empty($filters['status'])) {
+        if ($filters['status'] === 'completed') {
+            $query->whereHas('studentStatuses', function ($q) use ($student) {
+                $q->where('student_id', $student->id)->where('status', 'completed');
+            });
+        } else {
+            $query->whereDoesntHave('studentStatuses', function ($q) use ($student) {
+                $q->where('student_id', $student->id)->where('status', 'completed');
+            });
+        }
+    }
+
+    $assignments = $query->with('teacherAssignment.subject:id,name')
+        ->orderBy('due_date', 'asc')
+        ->get();
+
+    // ✅ التأكد من وجود مهام
+    if ($assignments->isEmpty()) {
+        return collect(); // أو return $assignments;
+    }
+
+    // ✅ الآن بأمان نجيب الحالات
+    $statuses = StudentAssignmentStatus::where('student_id', $student->id)
+        ->whereIn('assignment_id', $assignments->pluck('id'))
+        ->pluck('status', 'assignment_id');
+
+    $today = now()->startOfDay();
+
+    foreach ($assignments as $assignment) {
+        // ✅ استخدام ?? بدلاً من get مع default
+        $status = $statuses->get($assignment->id) ?? 'in_progress';
+        $assignment->status = $status;
+
+        $isUrgent = false;
+        if ($status !== 'completed' && $assignment->due_date) {
+            $daysLeft = $today->diffInDays($assignment->due_date, false);
+            $isUrgent = $daysLeft >= 0 && $daysLeft <= self::URGENT_DAYS_THRESHOLD;
+        }
+        $assignment->is_urgent = $isUrgent;
+    }
+
+    return $assignments;
+}
+
+    // نسبة إنجاز اليوم (بطاقة "إنجازك اليوم")
+    public function todayProgressForStudent(Student $student): array
+    {
+        $today = $this->todayForStudent($student);
+        $total = $today->count();
+
+        if ($total === 0) {
+            return ['completed' => 0, 'total' => 0, 'percentage' => 0];
+        }
+
+        $completedCount = StudentAssignmentStatus::where('student_id', $student->id)
+            ->whereIn('assignment_id', $today->pluck('id'))
+            ->where('status', 'completed')
+            ->count();
+
+        return [
+            'completed' => $completedCount,
+            'total' => $total,
+            'percentage' => (int) round(($completedCount / $total) * 100),
+        ];
+    }
+
+    // زر "تسليم" = تحديد المهمة كمكتملة (شخصي بحت، بدون إشعار للمعلم)
+    public function markCompleted(Student $student, int $assignmentId): StudentAssignmentStatus
+    {
+        return StudentAssignmentStatus::updateOrCreate(
+            ['assignment_id' => $assignmentId, 'student_id' => $student->id],
+            ['status' => 'completed']
+        );
+    }
+
+public function recentActivityForStudent(Student $student, int $limit = 10): array
+{
+    $activities = collect();
+
+    // 1) واجبات مسلّمة مؤخراً
+    $submittedAssignments = StudentAssignmentStatus::where('student_id', $student->id)
+        ->where('status', 'completed')
+        ->with('assignment.teacherAssignment.subject')
+        ->latest('updated_at')
+        ->limit($limit)
+        ->get();
+
+    foreach ($submittedAssignments as $entry) {
+        $activities->push([
+            'type' => 'assignment_submitted',
+            'title' => 'تم تسليم واجب',
+            'description' => $entry->assignment->title . ' - ' . $entry->assignment->teacherAssignment->subject->name,
+            'date' => $entry->updated_at,
+        ]);
+    }
+
+    // 2) سجلات حضور مؤخراً
+    $attendanceRecords = Attendance::where('student_id', $student->id)
+        ->latest('date')
+        ->limit($limit)
+        ->get();
+
+    foreach ($attendanceRecords as $record) {
+        $statusLabel = match ($record->status) {
+            'present' => 'تسجيل حضور',
+            'absent' => 'تسجيل غياب',
+            'late' => 'تسجيل تأخير',
+            'excused' => 'غياب بعذر',
+        };
+
+        $activities->push([
+            'type' => 'attendance',
+            'title' => $statusLabel,
+            'description' => 'بتاريخ ' . \Carbon\Carbon::parse($record->date)->format('Y-m-d'),
+            'date' => $record->date,
+        ]);
+    }
+
+    // ترتيب الكل حسب التاريخ (الأحدث أولاً)، وقص للعدد المطلوب
+    return $activities->sortByDesc('date')->take($limit)->values()->toArray();
+}
+
+// أضف هذا التابع بأسفل AssignmentService
+
+// تفاصيل مهام اليوم مع حالة كل واحدة (لزر "تفاصيل التقدم")
+public function todayDetailedForStudent(Student $student)
+{
+    $assignments = $this->todayForStudent($student);
+
+    if ($assignments->isEmpty()) {
+        return collect();
+    }
+
+    $statuses = StudentAssignmentStatus::where('student_id', $student->id)
+        ->whereIn('assignment_id', $assignments->pluck('id'))
+        ->pluck('status', 'assignment_id');
+
+    foreach ($assignments as $assignment) {
+        $assignment->status = $statuses->get($assignment->id) ?? 'in_progress';
+    }
+
+    return $assignments;
+}
 }

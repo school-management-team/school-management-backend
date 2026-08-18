@@ -7,6 +7,7 @@ use App\Models\GradeSubmission;
 use App\Models\Student;
 use App\Models\Teacher;
 use App\Models\TeacherAssignment;
+use App\Models\TeacherTask;
 
 class GradeService
 {
@@ -45,13 +46,13 @@ class GradeService
     }
 
     // هل هذي الشعبة مقفلة (مرفوعة/معتمدة) لهذا الفصل؟
-    public function isLocked(TeacherAssignment $teacherAssignment, int $semester): bool
-    {
-        return GradeSubmission::where('teacher_assignment_id', $teacherAssignment->id)
-            ->where('semester', $semester)
-            ->whereIn('status', ['submitted', 'approved'])
-            ->exists();
-    }
+public function isLocked(TeacherAssignment $teacherAssignment, int $semester): bool
+{
+    return GradeSubmission::where('teacher_assignment_id', $teacherAssignment->id)
+        ->where('semester', $semester)
+        ->where('status', 'approved')   // ← بدل whereIn(['submitted', 'approved'])
+        ->exists();
+}
 
     // التحقق: هل كل طلاب الشعبة عندهم الأنواع الثلاثة كاملة لهذا الفصل؟
     public function isSectionComplete(TeacherAssignment $teacherAssignment, int $semester): bool
@@ -68,7 +69,7 @@ class GradeService
                 ->where('semester', $semester)
                 ->pluck('type');
 
-            if (!$typesEntered->contains('participation') || !$typesEntered->contains('study') || !$typesEntered->contains('exam')) {
+            if (!$typesEntered->contains('participation') || !$typesEntered->contains('quiz') || !$typesEntered->contains('exam')) {
                 return false;
             }
         }
@@ -156,18 +157,18 @@ class GradeService
             $studentGrades = $grades->get($student->id, collect());
 
             $participation = $studentGrades->firstWhere('type', 'participation')?->value;
-            $study = $studentGrades->firstWhere('type', 'study')?->value;
+            $quiz = $studentGrades->firstWhere('type', 'quiz')?->value;
             $exam = $studentGrades->firstWhere('type', 'exam')?->value;
 
             $total = ($participation * self::PARTICIPATION_WEIGHT / 100)
-                + ($study * self::STUDY_WEIGHT / 100)
+                + ($quiz * self::STUDY_WEIGHT / 100)
                 + ($exam * self::EXAM_WEIGHT / 100);
 
             $results[] = [
                 'student_id' => $student->id,
                 'student_name' => $student->user->user_name,
                 'participation_value' => $participation,
-                'study_value' => $study,
+                'quiz_value' => $quiz,
                 'exam_value' => $exam,
                 'total_value' => round($total, 2),
             ];
@@ -194,4 +195,121 @@ class GradeService
 
         return true;
     }
+
+
+// تفصيل علامات الطالب بفصل معيّن (أو كل الفصول لو null)
+public function subjectBreakdownForStudent(Student $student, ?int $semester = null): array
+{
+    if (!$student->section_id) {
+        return [];
+    }
+
+    $query = GradeSubmission::where('status', 'approved')
+        ->whereHas('teacherAssignment', fn ($q) => $q->where('section_id', $student->section_id));
+
+    if ($semester !== null) {
+        $query->where('semester', $semester);
+    }
+
+    $submissions = $query->with('teacherAssignment.subject')->get();
+
+    $result = [];
+
+    foreach ($submissions as $submission) {
+        $computed = $this->computeFinalGrades($submission->teacherAssignment, $submission->semester);
+        $studentGrade = collect($computed)->firstWhere('student_id', $student->id);
+
+        if (!$studentGrade || $studentGrade['total_value'] === null) {
+            continue;
+        }
+
+        $subject = $submission->teacherAssignment->subject;
+
+        $result[] = [
+            'subject' => $subject->name,
+            'total_value' => $studentGrade['total_value'],
+            'passing_grade' => $subject->passing_grade,
+            'passed' => $studentGrade['total_value'] >= $subject->passing_grade,
+        ];
+    }
+
+    return $result;
+}
+
+// آخر فصل صدرت فيه علامات معتمدة (الثاني أولاً، ثم الأول، ثم رسالة عدم الصدور)
+public function currentSemesterBreakdown(Student $student): array
+{
+    foreach ([2, 1] as $semester) {
+        $breakdown = $this->subjectBreakdownForStudent($student, $semester);
+
+        if (!empty($breakdown)) {
+            $totals = array_column($breakdown, 'total_value');
+
+            return [
+                'semester' => $semester,
+                'semester_label' => $semester === 1 ? 'الفصل الدراسي الأول' : 'الفصل الدراسي الثاني',
+                'average_grade_100' => round(array_sum($totals) / count($totals), 2),
+                'subjects' => $breakdown,
+                'message' => null,
+            ];
+        }
+    }
+
+    return [
+        'semester' => null,
+        'semester_label' => null,
+        'average_grade_100' => null,
+        'subjects' => [],
+        'message' => 'لم تصدر الدرجات بعد',
+    ];
+}
+
+// متوسط الطالب (تُستخدم بلوحة التحكم الرئيسية)
+public function averageForStudent(Student $student): ?float
+{
+    return $this->currentSemesterBreakdown($student)['average_grade_100'];
+}
+
+
+public function recentActivityForTeacher(Teacher $teacher, int $limit = 10): array
+{
+    $activities = collect();
+
+    // 1) مهام أنشأها المعلم مؤخراً
+    $tasks = TeacherTask::whereHas('teacherAssignment', fn ($q) => $q->where('teacher_id', $teacher->id))
+        ->with('teacherAssignment.section.schoolClass:id,name')
+        ->latest('created_at')
+        ->limit($limit)
+        ->get();
+
+    foreach ($tasks as $task) {
+        $activities->push([
+            'type' => 'task_created',
+            'title' => 'مهمة جديدة: ' . $task->title,
+            'description' => $task->teacherAssignment->section->schoolClass->name . ' - ' . $task->teacherAssignment->section->name,
+            'date' => $task->created_at,
+        ]);
+    }
+
+    // 2) علامات شعب رُفعت أو اعتُمدت مؤخراً
+    $submissions = GradeSubmission::whereHas('teacherAssignment', fn ($q) => $q->where('teacher_id', $teacher->id))
+        ->with('teacherAssignment.section.schoolClass:id,name')
+        ->latest('updated_at')
+        ->limit($limit)
+        ->get();
+
+    foreach ($submissions as $submission) {
+        $label = $submission->status === 'approved' ? 'تم اعتماد درجات' : 'تم رصد درجات';
+        $semesterLabel = $submission->semester === 1 ? 'الفصل الأول' : 'الفصل الثاني';
+
+        $activities->push([
+            'type' => 'grade_submission',
+            'title' => $label,
+            'description' => $submission->teacherAssignment->section->schoolClass->name . ' - ' . $submission->teacherAssignment->section->name,
+            'date' => $submission->updated_at,
+        ]);
+    }
+
+    return $activities->sortByDesc('date')->take($limit)->values()->toArray();
+}
 }

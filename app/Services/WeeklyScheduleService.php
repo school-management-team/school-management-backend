@@ -1,8 +1,8 @@
 <?php
-// app/Services/WeeklyScheduleService.php
 namespace App\Services;
 
 use App\Models\LessonPlan;
+use App\Models\Student;
 use App\Models\Teacher;
 use App\Models\WeeklySchedule;
 
@@ -10,67 +10,56 @@ class WeeklyScheduleService
 {
     private array $days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday'];
 
-    // جدول يوم واحد، مع خطة الدرس الخاصة بذلك التاريخ بالضبط
-public function dayOf(Teacher $teacher, string $dayOfWeek, string $date)
-{
-    $schedules = WeeklySchedule::where('teacher_id', $teacher->id)
-        ->where('day_of_week', $dayOfWeek)
-        ->with('teacherAssignment.subject:id,name', 'teacherAssignment.section.schoolClass:id,name')
-        ->orderBy('period_number')
-        ->get();
+    // ==================== توابع المعلم (بدون تغيير) ====================
 
-    $today = now()->toDateString();
-    $now = now()->format('H:i:s');
-
-    foreach ($schedules as $schedule) {
-        if ($date < $today) {
-            $schedule->status = 'completed';
-        } elseif ($date > $today) {
-            $schedule->status = 'upcoming';
-        } else {
-            if ($now < $schedule->start_time) {
-                $schedule->status = 'upcoming';
-            } elseif ($now > $schedule->end_time) {
-                $schedule->status = 'completed';
-            } else {
-                $schedule->status = 'now';
-            }
-        }
-    }
-
-    $scheduleIds = $schedules->pluck('id');
-    $plans = LessonPlan::whereIn('weekly_schedule_id', $scheduleIds)
-        ->where('date', $date)
-        ->pluck('content', 'weekly_schedule_id');
-
-    foreach ($schedules as $schedule) {
-        $schedule->lesson_plan = $plans->get($schedule->id);
-    }
-
-    return $schedules;
-}
-    // جدول الأسبوع كامل (بدون خطط، عشان يضل خفيف)
-    public function week(Teacher $teacher)
+    public function dayOf(Teacher $teacher, string $dayOfWeek, string $date)
     {
-        $result = [];
+        $schedules = WeeklySchedule::where('teacher_id', $teacher->id)
+            ->where('day_of_week', $dayOfWeek)
+            ->with('teacherAssignment.subject:id,name', 'teacherAssignment.section.schoolClass:id,name')
+            ->orderBy('period_number')
+            ->get();
 
-        foreach ($this->days as $day) {
-            $result[$day] = WeeklySchedule::where('teacher_id', $teacher->id)
-                ->where('day_of_week', $day)
-                ->with('teacherAssignment.subject:id,name', 'teacherAssignment.section.schoolClass:id,name')
-                ->orderBy('period_number')
-                ->get();
+        $this->applyStatus($schedules, $date);
+
+        $scheduleIds = $schedules->pluck('id');
+        $plans = LessonPlan::whereIn('weekly_schedule_id', $scheduleIds)
+            ->where('date', $date)
+            ->pluck('content', 'weekly_schedule_id');
+
+        foreach ($schedules as $schedule) {
+            $schedule->lesson_plan = $plans->get($schedule->id);
         }
+        return $schedules->map(function ($schedule) {
+        return $this->formatScheduleItem($schedule);
+    });
 
-        return $result;
+
     }
 
+// app/Services/WeeklyScheduleService.php
+
+public function week(Teacher $teacher)
+{
+    $result = [];
+    foreach ($this->days as $day) {
+        $schedules = WeeklySchedule::where('teacher_id', $teacher->id)
+            ->where('day_of_week', $day)
+            ->with('teacherAssignment.subject:id,name', 'teacherAssignment.section.schoolClass:id,name')
+            ->orderBy('period_number')
+            ->get();
+
+        $this->applyStatus($schedules, now()->toDateString());   // ← السطر الناقص
+
+        $result[$day] = $schedules->map(fn ($schedule) => $this->formatScheduleItem($schedule));
+    }
+    return $result;
+}
     public function findForTeacher(Teacher $teacher, int $scheduleId): ?WeeklySchedule
     {
         return WeeklySchedule::where('teacher_id', $teacher->id)->find($scheduleId);
     }
 
-    // كتابة/تعديل خطة الدرس ليوم فعلي محدد
     public function saveLessonPlan(WeeklySchedule $schedule, string $date, string $content): LessonPlan
     {
         return LessonPlan::updateOrCreate(
@@ -79,27 +68,136 @@ public function dayOf(Teacher $teacher, string $dayOfWeek, string $date)
         );
     }
 
-    // ملخص حصص اليوم (العدد + الحصة القادمة)
     public function todaySummary(Teacher $teacher): array
     {
         $dayOfWeek = strtolower(now()->englishDayOfWeek);
 
         $todayClasses = WeeklySchedule::where('teacher_id', $teacher->id)
-        ->where('day_of_week', $dayOfWeek)
-        ->where('type', 'class')
-        ->with('teacherAssignment.subject:id,name', 'teacherAssignment.section.schoolClass:id,name')
-        ->orderBy('period_number')
-        ->get();
+            ->where('day_of_week', $dayOfWeek)
+            ->where('type', 'class')
+            ->with('teacherAssignment.subject:id,name', 'teacherAssignment.section.schoolClass:id,name')
+            ->orderBy('period_number')
+            ->get();
 
         $now = now()->format('H:i:s');
+        $nextClass = $todayClasses->first(fn ($schedule) => $schedule->start_time > $now);
 
-        $nextClass = $todayClasses->first(function ($schedule) use ($now) {
-            return $schedule->start_time > $now;
-        });
-
-        return [
-        'total_today' => $todayClasses->count(),
-        'next_class' => $nextClass,
-        ];
+        return ['total_today' => $todayClasses->count(), 'next_class' => $nextClass];
     }
+
+    // ==================== توابع الطالب (جديدة، بنفس الملف) ====================
+
+    // جدول يوم واحد لشعبة الطالب: حصص فعلية (حسب المادة والمعلم) + استراحات مشتركة، بدون فراغات المعلمين
+    public function dayForStudent(Student $student, string $dayOfWeek, string $date)
+    {
+        if (!$student->section_id) {
+            return collect();
+        }
+
+        $classes = WeeklySchedule::where('day_of_week', $dayOfWeek)
+            ->where('type', 'class')
+            ->whereHas('teacherAssignment', function ($query) use ($student) {
+                $query->where('section_id', $student->section_id);
+            })
+            ->with('teacherAssignment.subject:id,name', 'teacherAssignment.teacher.user:id,user_name')
+            ->get();
+
+        $breaks = WeeklySchedule::where('day_of_week', $dayOfWeek)
+            ->where('type', 'break')
+            ->get()
+            ->unique('period_number');
+
+        $schedule = $classes->concat($breaks)->sortBy('period_number')->values();
+
+        $this->applyStatus($schedule, $date);
+
+        return $schedule;
+    }
+
+    public function weekForStudent(Student $student)
+    {
+        $result = [];
+        foreach ($this->days as $day) {
+            $result[$day] = $this->dayForStudent($student, $day, now()->toDateString());
+        }
+        return $result;
+    }
+
+
+
+public function todaySummaryForStudent(Student $student): array
+{
+    $dayOfWeek = strtolower(now()->englishDayOfWeek);
+    $today = $this->dayForStudent($student, $dayOfWeek, now()->toDateString());
+    $classesOnly = $today->where('type', 'class')->values();
+
+    $classesOnly->load(['teacherAssignment.subject', 'teacherAssignment.section.schoolClass']);
+
+    $now = now()->format('H:i:s');
+    $nextClass = $classesOnly->first(fn ($c) => $c->start_time > $now);
+
+    // الحصص اللي لسا ما خلصت (جارية أو قادمة)
+    $remaining = $classesOnly->filter(fn ($c) => $c->end_time > $now);
+
+    $remainingMinutes = 0;
+    foreach ($remaining as $class) {
+        $start = \Carbon\Carbon::parse(max($class->start_time, $now));
+        $end = \Carbon\Carbon::parse($class->end_time);
+        $remainingMinutes += $start->diffInMinutes($end);
+    }
+
+    return [
+        'next_class' => $nextClass,
+        'remaining_hours_today' => round($remainingMinutes / 60, 1),
+    ];
+}
+
+    // ==================== دالة مشتركة (تحسب upcoming/now/completed حسب التاريخ المطلوب) ====================
+
+    private function applyStatus($schedules, string $date): void
+    {
+        $today = now()->toDateString();
+        $now = now()->format('H:i:s');
+
+        foreach ($schedules as $schedule) {
+            if ($date < $today) {
+                $schedule->status = 'completed';
+            } elseif ($date > $today) {
+                $schedule->status = 'upcoming';
+            } else {
+                if ($now < $schedule->start_time) {
+                    $schedule->status = 'upcoming';
+                } elseif ($now > $schedule->end_time) {
+                    $schedule->status = 'completed';
+                } else {
+                    $schedule->status = 'now';
+                }
+            }
+        }
+    }
+
+
+
+private function formatScheduleItem($schedule)
+{
+    // تحويل إلى array
+    $data = $schedule->toArray();
+
+    // إذا كان النوع ليس class، نضع القيم null
+    if ($schedule->type !== 'class') {
+        $data['subject_name'] = null;
+        $data['section_name'] = null;
+        $data['class_name'] = null;
+        $data['teacher_assignment'] = null;
+    } else {
+        // للـ class نضيف البيانات من العلاقات
+        if ($schedule->teacherAssignment) {
+            $data['subject_name'] = $schedule->teacherAssignment->subject->name ?? null;
+            $data['section_name'] = $schedule->teacherAssignment->section->name ?? null;
+            $data['class_name'] = $schedule->teacherAssignment->section->schoolClass->name ?? null;
+        }
+    }
+
+    return $data;
+}
 }

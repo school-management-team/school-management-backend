@@ -18,6 +18,7 @@ class Student extends Model
         'student_number',
         'father_name',
         'mother_name',
+        'nationality', 'national_id', 'address', 'medical_notes',
         'enrollment_date',
         'class_id',
         'section_id',

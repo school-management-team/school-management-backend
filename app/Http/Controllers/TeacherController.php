@@ -236,7 +236,7 @@ if ($type === 'true_false') {
 
 
 
-// عرض/فلترة الإعلانات (تبويبات: الكل، إداري، أكاديمي، نشاطات)
+// عرض/فلترة الإعلانات
 public function announcements(Request $request)
 {
     $filters = $request->only(['type', 'per_page']);
@@ -250,12 +250,23 @@ public function announcements(Request $request)
     return response()->json(['success' => true, 'data' => $announcements]);
 }
 
-// الفعاليات القادمة
+// الفعاليات القادمة (تُستخدم بفلتر type=activity)
 public function upcomingAnnouncements(Request $request)
 {
-    $announcements = $this->announcementService->upcoming($request->limit ?? 5);
+    $announcements = $this->announcementService->upcoming(
+        $request->limit ?? 5,
+        $request->type ?? null
+    );
 
     return response()->json(['success' => true, 'data' => $announcements]);
+}
+
+// "تواريخ مهمة"
+public function importantAnnouncementDates(Request $request)
+{
+    $dates = $this->announcementService->upcomingImportant($request->limit ?? 2);
+
+    return response()->json(['success' => true, 'data' => $dates]);
 }
 
 // نقاط التقويم
@@ -275,16 +286,48 @@ public function announcementCalendarDots(Request $request)
     return response()->json(['success' => true, 'data' => $dates]);
 }
 
-// تفاصيل إعلان واحد (زر "قراءة المزيد")
+// كل إعلانات شهر كامل
+public function announcementsForMonth(Request $request)
+{
+    $validator = Validator::make($request->all(), [
+        'year' => 'required|integer',
+        'month' => 'required|integer|min:1|max:12',
+    ]);
+
+    if ($validator->fails()) {
+        return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+    }
+
+    $announcements = $this->announcementService->forMonth($request->year, $request->month);
+
+    return response()->json(['success' => true, 'data' => $announcements]);
+}
+
+// كل إعلانات يوم محدد
+public function announcementsForDay(Request $request)
+{
+    $validator = Validator::make($request->all(), [
+        'year' => 'required|integer',
+        'month' => 'required|integer|min:1|max:12',
+        'day' => 'required|integer|min:1|max:31',
+    ]);
+
+    if ($validator->fails()) {
+        return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+    }
+
+    $announcements = $this->announcementService->forDay($request->year, $request->month, $request->day);
+
+    return response()->json(['success' => true, 'data' => $announcements]);
+}
+
+// تفاصيل إعلان واحد
 public function showAnnouncement($id)
 {
     $announcement = $this->announcementService->find($id);
 
     return response()->json(['success' => true, 'data' => $announcement]);
 }
-
-
-
 
 // تعبئة قائمة "اختر المادة"
 public function assignmentSubjects(Request $request)
@@ -606,7 +649,7 @@ public function storeGrade(Request $request)
         'subject_id' => 'required|exists:subjects,id',
         'section_id' => 'required|exists:sections,id',
         'student_id' => 'required|exists:students,id',
-        'type' => 'required|in:participation,study,exam',
+        'type' => 'required|in:participation,quiz,exam',
         'semester' => 'required|integer|in:1,2',
         'value' => 'required|numeric|min:0|max:100',
     ]);
@@ -648,7 +691,7 @@ public function mySections(Request $request)
 public function studentsForGrading(Request $request, int $teacherAssignmentId)
 {
     $validator = Validator::make($request->all(), [
-        'type' => 'required|in:participation,study,exam',
+        'type' => 'required|in:participation,quiz,exam',
         'semester' => 'required|integer|in:1,2',
     ]);
 
@@ -675,7 +718,7 @@ public function studentsForGrading(Request $request, int $teacherAssignmentId)
 public function storeBulkGrades(Request $request, int $teacherAssignmentId)
 {
     $validator = Validator::make($request->all(), [
-        'type' => 'required|in:participation,study,exam',
+        'type' => 'required|in:participation,quiz,exam',
         'semester' => 'required|integer|in:1,2',
         'grades' => 'required|array|min:1',
         'grades.*.student_id' => 'required|exists:students,id',
@@ -749,5 +792,18 @@ public function profile(Request $request)
     $baseProfile['assignments'] = $assignments;
 
     return response()->json(['success' => true, 'data' => $baseProfile]);
+}
+// TeacherController — أضف
+public function taskProgressDetails(Request $request)
+{
+    $tasks = $this->teacherTaskService->todayDetailed($request->user()->teacher);
+
+    return response()->json(['success' => true, 'data' => $tasks]);
+}
+public function recentActivity(Request $request)
+{
+    $activities = $this->gradeService->recentActivityForTeacher($request->user()->teacher);
+
+    return response()->json(['success' => true, 'data' => $activities]);
 }
 }

@@ -62,13 +62,22 @@ class AuthController extends Controller
 
 public function registerStudent(Request $request)
 {
+    // أضف هذا السطر بأول كل تابع تسجيل، قبل استدعاء Validator::make
+$request->merge([
+    'gender' => match ($request->gender) {
+        'ذكر' => 'male',
+        'أنثى' => 'female',
+        default => $request->gender, // لو أصلاً أرسل male/female مباشرة، يبقى كما هو
+    },
+]);
+
     $validator = Validator::make($request->all(), [
         'email' => 'required|string|unique:users,email',
         'password' => 'required|string|min:8|confirmed',
         'phone' =>['required', 'regex:/^09[0-9]{8}$/', 'unique:users,phone'],
         'user_name' => 'required|string|max:100',
         'gender' => 'required|in:male,female',
-        'birth_date' => ['required', 'date', 'before_or_equal:' . now()->subYears(15)->format('Y-m-d')],
+        'birth_date' => ['required', 'date', 'after_or_equal:' . now()->subYears(15)->format('Y-m-d'),'before_or_equal:' . now()->subYears(5)->format('Y-m-d')],
         'father_name' => 'required|string|max:100',
         'mother_name' => 'required|string|max:100',
         'class_id' => 'required|integer|exists:classes,id',
@@ -130,6 +139,14 @@ public function registerStudent(Request $request)
 
 public function registerTeacher(Request $request)
 {
+    // أضف هذا السطر بأول كل تابع تسجيل، قبل استدعاء Validator::make
+$request->merge([
+    'gender' => match ($request->gender) {
+        'ذكر' => 'male',
+        'أنثى' => 'female',
+        default => $request->gender, // لو أصلاً أرسل male/female مباشرة، يبقى كما هو
+    },
+]);
     $validator = Validator::make($request->all(), [
         'email' => 'required|string|unique:users,email',
         'password' => 'required|string|min:8|confirmed',
@@ -190,6 +207,14 @@ public function registerTeacher(Request $request)
 
 public function registerGuardian(Request $request)
 {
+    // أضف هذا السطر بأول كل تابع تسجيل، قبل استدعاء Validator::make
+$request->merge([
+    'gender' => match ($request->gender) {
+        'ذكر' => 'male',
+        'أنثى' => 'female',
+        default => $request->gender, // لو أصلاً أرسل male/female مباشرة، يبقى كما هو
+    },
+]);
     $validator = Validator::make($request->all(), [
 
         'email' => 'required|email|unique:users,email',
@@ -285,6 +310,14 @@ public function registerGuardian(Request $request)
 
 public function registerSupervisor(Request $request)
 {
+    // أضف هذا السطر بأول كل تابع تسجيل، قبل استدعاء Validator::make
+$request->merge([
+    'gender' => match ($request->gender) {
+        'ذكر' => 'male',
+        'أنثى' => 'female',
+        default => $request->gender, // لو أصلاً أرسل male/female مباشرة، يبقى كما هو
+    },
+]);
     $validator = Validator::make($request->all(), [
 
         'email' => 'required|email|unique:users,email',

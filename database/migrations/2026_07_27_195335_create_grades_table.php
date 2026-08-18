@@ -20,6 +20,7 @@ public function up(): void
         $table->double('value');
         $table->enum('status', ['draft', 'approved', 'rejected'])->default('draft');
        $table->unique(['student_id', 'teacher_assignment_id', 'type', 'semester']);
+       $table->timestamps();
     });
 }
 public function down(): void { Schema::dropIfExists('grades'); }

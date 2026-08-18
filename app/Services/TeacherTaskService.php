@@ -111,4 +111,19 @@ if (array_key_exists('is_important', $filters)) {
             $teacherAssignmentQuery->where('teacher_id', $teacher->id);
         })->where('status', 'in_progress')->count();
     }
+
+    // أضف هذا التابع بأسفل TeacherTaskService
+
+// تفاصيل مهام اليوم (لزر "تفاصيل التقدم")
+public function todayDetailed(Teacher $teacher)
+{
+    $today = now()->toDateString();
+
+    return TeacherTask::whereHas('teacherAssignment', function ($q) use ($teacher) {
+            $q->where('teacher_id', $teacher->id);
+        })
+        ->where('due_date', $today)
+        ->with('teacherAssignment.subject:id,name', 'teacherAssignment.section.schoolClass:id,name')
+        ->get();
+}
 }

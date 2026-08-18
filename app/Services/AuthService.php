@@ -169,18 +169,20 @@ $data = [
 
     if ($user->isAdmin()) return $data;
 
-    if ($user->isStudent()) {
-        $data['profile'] = [
-            'student_number' => $user->student?->student_number,
-            'father_name' => $user->student?->father_name,
-            'mother_name' => $user->student?->mother_name,
-            'class' => $user->student?->schoolClass?->name,
-            'stage' => $user->student?->schoolClass?->stage?->name,
-            'section' => $user->student?->section?->name,
-            'enrollment_date' => $user->student?->enrollment_date,
-        ];
-    }
+if ($user->isStudent()) {
+    $stage = $user->student?->schoolClass?->stage;
 
+    $data['profile'] = [
+        'student_number' => $user->student?->student_number,
+        'father_name' => $user->student?->father_name,
+        'mother_name' => $user->student?->mother_name,
+        'class' => $user->student?->schoolClass?->name,
+        'stage' => $stage?->name,
+        'track' => $stage?->track_label,
+        'section' => $user->student?->section?->name,
+        'enrollment_date' => $user->student?->enrollment_date,
+    ];
+}
     if ($user->isTeacher()) {
         $data['profile'] = [
             'subject' => $user->teacher?->subject?->name,

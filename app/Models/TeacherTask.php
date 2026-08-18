@@ -2,11 +2,13 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class TeacherTask extends Model
 {
+    use HasFactory;
     protected $fillable = ['teacher_assignment_id', 'title', 'description', 'is_important', 'status', 'due_date'];
 
     protected $casts = [

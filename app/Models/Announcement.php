@@ -3,11 +3,13 @@
 // app/Models/Announcement.php
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Announcement extends Model
 {
+    use HasFactory;
     protected $fillable = [
         'supervisor_id', 'title', 'description', 'type',
         'is_important', 'date', 'image_path', 'attachment_path',

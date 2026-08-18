@@ -13,6 +13,10 @@ return new class extends Migration
             $table->string('student_number', 5)->nullable()->unique();
             $table->string('father_name');
             $table->string('mother_name');
+            $table->string('nationality')->nullable();
+            $table->string('national_id')->nullable()->unique();
+            $table->string('address')->nullable();
+            $table->text('medical_notes')->nullable();
 
             $table->date('enrollment_date');
 
