@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -25,7 +26,7 @@ class Attendance extends Model
 
     public function student(): BelongsTo { return $this->belongsTo(Student::class); }
     public function section(): BelongsTo { return $this->belongsTo(Section::class); }
-    public function supervisor(): BelongsTo { return $this->belongsTo(Supervisor::class); }
+    public function supervisor(): BelongsTo { return $this->belongsTo(supervisor::class); }
 
     public function scopeForDate($query, $date) { return $query->whereDate('date', $date); }
     public function scopeAbsentOrLate($query) { return $query->whereIn('status', ['absent', 'late']); }

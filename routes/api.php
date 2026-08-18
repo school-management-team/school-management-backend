@@ -4,7 +4,15 @@ use App\Http\Controllers\TeacherController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\AdminUserController;
 use App\Http\Controllers\AdminAcademicController;
+
 use App\Http\Controllers\StudentController;
+
+use App\Http\Controllers\ClassController;
+use App\Http\Controllers\SectionController;
+use App\Http\Controllers\StudentSectionController;
+use App\Http\Controllers\SubjectController;
+use App\Http\Controllers\TeacherAssignmentController;
+
 use Illuminate\Support\Facades\Route;
 
 // ==================== Public Routes ====================
@@ -132,6 +140,7 @@ Route::middleware(['auth:sanctum', 'active', 'role:teacher'])->group(function ()
 
     Route::get('/teacher/sections/{teacherAssignmentId}/grade-status', [TeacherController::class, 'sectionGradeStatus']);
 
+
     Route::get('/teacher/activity', [TeacherController::class, 'recentActivity']);
 
 
@@ -164,6 +173,8 @@ Route::middleware(['auth:sanctum', 'active', 'role:student'])->group(function ()
     Route::get('/student/activity', [StudentController::class, 'recentActivity']);
 
     Route::get('/student/assignments/progress/details', [StudentController::class, 'assignmentProgressDetails']);
+
+
 
 
 });
