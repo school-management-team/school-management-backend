@@ -49,6 +49,35 @@ class SchoolCalendarService
         return !$this->isHoliday($date);
     }
 
+    /** اسم اليوم بالعربي، للرسائل الموجّهة للمستخدم */
+    public function dayLabel(?string $day): string
+    {
+        if ($day === null) {
+            return 'عطلة';
+        }
+
+        return config('school.day_labels')[$day] ?? $day;
+    }
+
+    /**
+     * أقرب تاريخين يوافقان يوماً معيّناً حول تاريخ مرجعي.
+     *
+     * لما يبعت المستخدم تاريخ ما بيوافق يوم الحصة، ما بيكفي نقول "غلط" —
+     * منقترح عليه التواريخ الصحيحة بدل ما يحسبها بنفسه.
+     */
+    public function nearestDatesFor(string $day, string $around): array
+    {
+        $reference = Carbon::parse($around);
+
+        $previous = $reference->copy()->previous($day);
+        $next = $reference->copy()->next($day);
+
+        return [
+            'previous' => $previous->toDateString(),
+            'next' => $next->toDateString(),
+        ];
+    }
+
     /**
      * سبب توقّف الدوام بهذا اليوم، أو null إذا اليوم دوام عادي.
      * بترجّع رسالة جاهزة للعرض مع نوع السبب (weekend أو holiday).

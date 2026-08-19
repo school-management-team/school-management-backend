@@ -192,13 +192,30 @@ class SubstitutionController extends Controller
         $dateDay = $this->dayOfWeek($date);
 
         if ($lesson->day_of_week !== $dateDay) {
+            /*
+             | ما بيكفي نقول "التاريخ غلط" — منقترح أقرب تاريخين يوافقان
+             | يوم الحصة، حتى ما يضطر المستخدم يحسبهن بنفسه.
+             */
+            $nearest = $this->calendarService->nearestDatesFor($lesson->day_of_week, $date);
+            $lessonDayLabel = $this->calendarService->dayLabel($lesson->day_of_week);
+            $dateDayLabel = $this->calendarService->dayLabel($dateDay);
+
             return response()->json([
                 'success' => false,
-                'message' => "الحصة رقم {$lesson->id} مجدولة يوم {$lesson->day_of_week}، والتاريخ {$date} يوم ".($dateDay ?? 'عطلة'),
+                'message' => "الحصة رقم {$lesson->id} مجدولة يوم {$lessonDayLabel}، "
+                    ."والتاريخ {$date} يوم {$dateDayLabel}. "
+                    ."أقرب {$lessonDayLabel} هو {$nearest['next']} (والسابق {$nearest['previous']})",
                 'data' => [
                     'lesson_day' => $lesson->day_of_week,
+                    'lesson_day_label' => $lessonDayLabel,
                     'date_day' => $dateDay,
+                    'date_day_label' => $dateDayLabel,
                     'date' => $date,
+                    // تواريخ جاهزة للاستعمال مباشرة
+                    'suggested_dates' => [
+                        'next' => $nearest['next'],
+                        'previous' => $nearest['previous'],
+                    ],
                 ],
             ], 422);
         }

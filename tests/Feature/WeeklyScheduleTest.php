@@ -282,4 +282,77 @@ class WeeklyScheduleTest extends TestCase
             ])
             ->assertForbidden();
     }
+
+    // ==================== المادة لازم تكون مقررة بالمرحلة ====================
+
+    /** تكليف مخالف: مادة مش مقررة بمرحلة الصف */
+    private function makeOffStageAssignment()
+    {
+        $history = $this->makeSubject('التاريخ');
+        $teacher = $this->makeTeacher($history, $this->makeStage(), 'أستاذ التاريخ');
+        $assignment = $this->makeAssignment($teacher, $history, $this->sectionA);
+
+        // فكّ الربط بالآخر — makeStage بيعيد ربط كل المواد، فلازم يكون هو الأخير.
+        // ننشئ التكليف بالموديل مباشرة لأن الـ API بترفضه، وهاد بالضبط
+        // سيناريو التكاليف القديمة اللي انخلقت قبل ما تنضاف القاعدة.
+        $history->stages()->sync([]);
+
+        return $assignment;
+    }
+
+    public function test_a_lesson_for_a_subject_not_taught_in_the_stage_is_rejected(): void
+    {
+        $assignment = $this->makeOffStageAssignment();
+
+        $response = $this->addLesson($assignment->id, 'sunday', 3)
+            ->assertStatus(422)
+            ->assertJsonPath('data.assignment_id', $assignment->id)
+            ->assertJsonPath('data.subject', 'التاريخ');
+
+        $this->assertStringContainsString('غير مقررة في مرحلة', $response->json('message'));
+        $this->assertSame(0, WeeklySchedule::count());
+    }
+
+    public function test_a_valid_subject_is_still_accepted(): void
+    {
+        // الرياضيات مقررة بالابتدائي — ما في سبب للرفض
+        $this->addLesson($this->mathAssignmentA->id, 'sunday', 3)->assertCreated();
+
+        $this->assertSame(1, WeeklySchedule::count());
+    }
+
+    public function test_the_bulk_builder_rejects_the_offending_row_only(): void
+    {
+        $bad = $this->makeOffStageAssignment();
+
+        $response = $this->actingAsSupervisor()->postJson('/api/supervisor/schedule/bulk', [
+            'lessons' => [
+                ['teacher_assignment_id' => $this->mathAssignmentA->id, 'day_of_week' => 'monday', 'period_number' => 1],
+                ['teacher_assignment_id' => $bad->id, 'day_of_week' => 'monday', 'period_number' => 2],
+            ],
+        ])->assertStatus(422);
+
+        // بيشاور على العنصر المخالف بالضبط
+        $this->assertSame(1, $response->json('data.errors.0.index'));
+        $this->assertSame($bad->id, $response->json('data.errors.0.assignment_id'));
+
+        // كلها أو ولا وحدة
+        $this->assertSame(0, WeeklySchedule::count());
+    }
+
+    public function test_moving_a_lesson_onto_an_invalid_assignment_is_rejected(): void
+    {
+        $this->addLesson($this->mathAssignmentA->id, 'sunday', 1)->assertCreated();
+        $lesson = WeeklySchedule::first();
+
+        $bad = $this->makeOffStageAssignment();
+
+        $this->actingAsSupervisor()
+            ->putJson("/api/supervisor/schedule/{$lesson->id}", [
+                'teacher_assignment_id' => $bad->id,
+            ])
+            ->assertStatus(422);
+
+        $this->assertSame($this->mathAssignmentA->id, $lesson->fresh()->teacher_assignment_id);
+    }
 }

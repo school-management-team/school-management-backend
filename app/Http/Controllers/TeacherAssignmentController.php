@@ -125,15 +125,48 @@ class TeacherAssignmentController extends Controller
         ]);
     }
 
+    /**
+     * حذف التكليف بيحذف معه حصصه من الجدول الأسبوعي — لأن مادة الحصة
+     * بتنقرأ من التكليف، فبدونه بتصير الحصة بلا مادة وخانتها فاضية.
+     *
+     * أول طلب بيرجّع تحذير يشرح شو رح يصير. إعادة نفس الطلب بتنفّذ الحذف.
+     */
     public function destroy(Request $request, TeacherAssignment $teacherAssignment)
     {
         $lessonsCount = WeeklySchedule::where('teacher_assignment_id', $teacherAssignment->id)->count();
 
-        if ($lessonsCount > 0 && !$request->boolean('force')) {
+        // التكليف بلا حصص ما بدّو تأكيد — ما في شي رح يضيع
+        if ($lessonsCount > 0 && $this->awaitingConfirmation($request, 'delete-assignment', $teacherAssignment->id)) {
+            $teacherAssignment->loadMissing('teacher.user', 'subject', 'section');
+
+            $teacherName = $teacherAssignment->teacher && $teacherAssignment->teacher->user
+                ? $teacherAssignment->teacher->user->user_name
+                : 'المعلم';
+
+            $subjectName = $teacherAssignment->subject ? $teacherAssignment->subject->name : 'المادة';
+            $sectionName = $teacherAssignment->section ? $teacherAssignment->section->name : '';
+
             return response()->json([
                 'success' => false,
-                'message' => "هذا التكليف مرتبط بـ {$lessonsCount} حصة في الجدول الأسبوعي، وحذفه سيحذفها معه. أعد الطلب مع force=1 للتأكيد",
-                'data' => ['lessons_count' => $lessonsCount],
+                'requires_confirmation' => true,
+                'message' => "لهذا التكليف {$lessonsCount} حصة في الجدول الأسبوعي. "
+                    ."مادة الحصة تُقرأ من التكليف، فحذفه يجعلها بلا مادة — "
+                    ."لذلك تُحذف الحصص معه وتصبح خاناتها فارغة. "
+                    ."إن كان المطلوب تبديل المعلم فقط، استخدم التعديل (PUT) بدل الحذف "
+                    ."ليبقى الجدول كما هو. لتأكيد الحذف أعد إرسال الطلب نفسه",
+                'data' => [
+                    'lessons_count' => $lessonsCount,
+                    'assignment' => [
+                        'teacher' => $teacherName,
+                        'subject' => $subjectName,
+                        'section' => $sectionName,
+                    ],
+                    // ما بينحذف مع التكليف — للتوضيح
+                    'preserved' => ['المعلم', 'المادة', 'الشعبة', 'العلامات', 'كشوف العلامات'],
+                    'will_be_deleted' => ["{$lessonsCount} حصة من الجدول الأسبوعي"],
+                    'alternative' => 'PUT /api/supervisor/teacher-assignments/'.$teacherAssignment->id.' مع teacher_id الجديد',
+                    'confirm_within_minutes' => 5,
+                ],
             ], 409);
         }
 

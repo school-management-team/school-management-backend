@@ -19,6 +19,17 @@ return [
 
     'school_days' => ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday'],
 
+    /** أسماء الأيام بالعربي — للرسائل الموجّهة للمستخدم */
+    'day_labels' => [
+        'sunday' => 'الأحد',
+        'monday' => 'الإثنين',
+        'tuesday' => 'الثلاثاء',
+        'wednesday' => 'الأربعاء',
+        'thursday' => 'الخميس',
+        'friday' => 'الجمعة',
+        'saturday' => 'السبت',
+    ],
+
     'semesters' => [1, 2],
 
     /*

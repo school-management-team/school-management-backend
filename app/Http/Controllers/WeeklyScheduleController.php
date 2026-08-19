@@ -212,6 +212,13 @@ class WeeklyScheduleController extends Controller
 
         $assignment = TeacherAssignment::findOrFail($validated['teacher_assignment_id']);
 
+        // التكليف نفسه صالح؟ (المادة مقررة بالمرحلة، ومرحلة المعلم تطابق)
+        $invalid = $this->invalidAssignment($assignment);
+
+        if ($invalid) {
+            return $invalid;
+        }
+
         return DB::transaction(function () use ($assignment, $validated, $period) {
             $conflicts = $this->conflicts(
                 $assignment->teacher_id,
@@ -288,6 +295,21 @@ class WeeklyScheduleController extends Controller
             }
 
             $assignment = $assignments->get($item['teacher_assignment_id']);
+
+            // التكليف نفسه صالح؟ (المادة مقررة بالمرحلة)
+            $invalid = $this->invalidAssignment($assignment);
+
+            if ($invalid) {
+                $body = $invalid->getData(true);
+
+                $errors[] = [
+                    'index' => $index,
+                    'reason' => $body['message'],
+                    'assignment_id' => $assignment->id,
+                ];
+                continue;
+            }
+
             $day = $item['day_of_week'];
             $slot = $day.'-'.$item['period_number'];
             $teacherSlot = $assignment->teacher_id.'-'.$slot;
@@ -404,6 +426,12 @@ class WeeklyScheduleController extends Controller
             ], 422);
         }
 
+        $invalid = $this->invalidAssignment($assignment);
+
+        if ($invalid) {
+            return $invalid;
+        }
+
         return DB::transaction(function () use ($schedule, $assignment, $day, $periodNumber, $period) {
             $conflicts = $this->conflicts(
                 $assignment->teacher_id,
@@ -453,6 +481,63 @@ class WeeklyScheduleController extends Controller
     }
 
     // ==================== أدوات داخلية ====================
+
+    /**
+     * التكليف نفسه صالح؟
+     *
+     * التكليف المفروض يكون انفحص وقت إنشائه، بس تكاليف قديمة (أو مزروعة)
+     * ممكن تكون خالفت القاعدة قبل ما تنضاف. فمنفحص هون كمان قبل ما نبني
+     * عليها جدولاً — أرخص من اكتشاف "التاريخ لصف ابتدائي" بعد النشر.
+     *
+     * بيرجّع استجابة رفض إذا في مخالفة، وإلا null.
+     */
+    private function invalidAssignment(TeacherAssignment $assignment)
+    {
+        $assignment->loadMissing('subject', 'teacher.stage', 'section.schoolClass.stage');
+
+        $class = $assignment->section ? $assignment->section->schoolClass : null;
+
+        if (!$class || !$class->stage_id || !$assignment->subject) {
+            return null;
+        }
+
+        $stageName = $class->stage ? $class->stage->name : '-';
+
+        // المادة مقررة بمرحلة هذا الصف؟
+        $taught = $assignment->subject->stages()->where('stages.id', $class->stage_id)->exists();
+
+        if (!$taught) {
+            return response()->json([
+                'success' => false,
+                'message' => "لا يمكن جدولة هذه الحصة: مادة ({$assignment->subject->name}) "
+                    ."غير مقررة في مرحلة ({$stageName}). التكليف رقم {$assignment->id} مخالف ويجب حذفه",
+                'data' => [
+                    'assignment_id' => $assignment->id,
+                    'subject' => $assignment->subject->name,
+                    'class_stage' => $stageName,
+                    'class_name' => $class->name,
+                ],
+            ], 422);
+        }
+
+        // ومرحلة المعلم تطابق مرحلة الصف؟
+        if ($assignment->teacher && $assignment->teacher->stage_id !== $class->stage_id) {
+            $teacherStage = $assignment->teacher->stage ? $assignment->teacher->stage->name : '-';
+
+            return response()->json([
+                'success' => false,
+                'message' => "لا يمكن جدولة هذه الحصة: مرحلة المعلم ({$teacherStage}) "
+                    ."لا تطابق مرحلة الصف ({$stageName}). التكليف رقم {$assignment->id} مخالف",
+                'data' => [
+                    'assignment_id' => $assignment->id,
+                    'teacher_stage' => $teacherStage,
+                    'class_stage' => $stageName,
+                ],
+            ], 422);
+        }
+
+        return null;
+    }
 
     /**
      * بيرجّع التعارضات بخانة معيّنة: المعلم مشغول، أو الشعبة مشغولة.

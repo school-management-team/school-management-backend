@@ -92,11 +92,21 @@ public function update(Request $request, SchoolClass $schoolClass)
         ], 422);
     }
 
-    $schoolClass->update($request->only(['name', 'grade_order', 'stage_id']));
+    // fill مش update — حتى نقدر نفحص إذا في تغيير فعلي قبل الحفظ
+    $schoolClass->fill($validator->validated());
+
+    if (!$schoolClass->isDirty()) {
+        return $this->noChangesMade($schoolClass->load('stage:id,name'));
+    }
+
+    $changed = array_keys($schoolClass->getDirty());
+    $schoolClass->save();
 
     return response()->json([
         'success' => true,
-        'message' => 'Class updated successfully',
+        'message' => 'تم تحديث الصف بنجاح',
+        'changed' => true,
+        'changed_fields' => $changed,
         'data' => $schoolClass->fresh()->load('stage:id,name'),
     ]);
 }

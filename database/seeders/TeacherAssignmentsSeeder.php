@@ -45,6 +45,16 @@ class TeacherAssignmentsSeeder extends Seeder
                     continue;
                 }
 
+                /*
+                 | والمادة لازم تكون مقررة بهالمرحلة (جدول stage_subject).
+                 | بدون هالفحص بينخلق تكليف زي "التاريخ لصف ابتدائي" —
+                 | والتاريخ مقرر بالأدبي بس.
+                 */
+                if ($classStageId && !$teacher->subject->stages()->where('stages.id', $classStageId)->exists()) {
+                    $skipped[$teacher->id] = $teacher;
+                    continue;
+                }
+
                 TeacherAssignment::firstOrCreate([
                     'teacher_id' => $teacher->id,
                     'subject_id' => $teacher->subject_id,
@@ -63,7 +73,8 @@ class TeacherAssignmentsSeeder extends Seeder
             if (!$hasAny) {
                 $name = $teacher->user ? $teacher->user->user_name : 'معلم #'.$teacher->id;
                 $stage = $teacher->stage ? $teacher->stage->name : '-';
-                $this->command?->warn("  {$name} ({$stage}) بلا تكاليف — ما في طلاب بمرحلته");
+                $subject = $teacher->subject ? $teacher->subject->name : '-';
+                $this->command?->warn("  {$name} بلا تكاليف — لا يوجد صف فيه طلاب تُدرَّس فيه {$subject} لمرحلة {$stage}");
             }
         }
     }

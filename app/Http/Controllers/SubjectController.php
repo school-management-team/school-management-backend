@@ -62,7 +62,7 @@ class SubjectController extends Controller
         }
 
         return DB::transaction(function () use ($validated, $subject) {
-            $subject->update([
+            $subject->fill([
                 'name' => $validated['name'] ?? $subject->name,
                 'passing_grade' => $validated['passing_grade'] ?? $subject->passing_grade,
                 'description' => array_key_exists('description', $validated)
@@ -70,14 +70,39 @@ class SubjectController extends Controller
                     : $subject->description,
             ]);
 
+            $changed = array_keys($subject->getDirty());
+
+            /*
+             | المراحل علاقة منفصلة، فما بتظهر بـ isDirty. منقارن القائمة
+             | المرسلة بالمحفوظة (مرتّبة، لأن الترتيب ما بيهم) حتى ما نقول
+             | "تم التعديل" على مزامنة ما غيّرت شي.
+             */
+            $stagesChanged = false;
+
             if (isset($validated['stage_ids'])) {
+                $current = $subject->stages()->pluck('stages.id')->map(fn ($id) => (int) $id)->sort()->values()->all();
+                $incoming = collect($validated['stage_ids'])->map(fn ($id) => (int) $id)->unique()->sort()->values()->all();
+
+                $stagesChanged = $current !== $incoming;
+            }
+
+            if (empty($changed) && !$stagesChanged) {
+                return $this->noChangesMade($subject->load('stages'));
+            }
+
+            $subject->save();
+
+            if ($stagesChanged) {
                 $subject->stages()->sync($validated['stage_ids']);
+                $changed[] = 'stages';
             }
 
             return response()->json([
                 'success' => true,
-                'message' => 'Subject updated successfully',
-                'data' => $subject->load('stages'),
+                'message' => 'تم تحديث المادة بنجاح',
+                'changed' => true,
+                'changed_fields' => $changed,
+                'data' => $subject->fresh()->load('stages'),
             ]);
         });
     }

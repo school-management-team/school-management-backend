@@ -507,6 +507,58 @@ class SubstitutionTest extends TestCase
             ->assertJsonPath('data.date_day', 'monday');
     }
 
+    public function test_the_mismatch_suggests_the_right_dates(): void
+    {
+        $this->recordAttendance();
+
+        // ما بيكفي نقول "غلط" — لازم يقترح التواريخ الصحيحة
+        $data = $this->actingAsSupervisor()->getJson(
+            "/api/supervisor/substitutions/available-teachers?weekly_schedule_id={$this->absentMathLesson->id}&date=2026-08-18"
+        )
+            ->assertStatus(422)
+            ->json('data');
+
+        // 2026-08-18 ثلاثاء → الأحد التالي 23 والسابق 16
+        $this->assertSame('2026-08-23', $data['suggested_dates']['next']);
+        $this->assertSame('2026-08-16', $data['suggested_dates']['previous']);
+    }
+
+    public function test_the_mismatch_message_uses_arabic_day_names(): void
+    {
+        $this->recordAttendance();
+
+        $response = $this->actingAsSupervisor()->getJson(
+            "/api/supervisor/substitutions/available-teachers?weekly_schedule_id={$this->absentMathLesson->id}&date=2026-08-18"
+        )->assertStatus(422);
+
+        $message = $response->json('message');
+
+        $this->assertStringContainsString('الأحد', $message);
+        $this->assertStringContainsString('الثلاثاء', $message);
+        $this->assertStringNotContainsString('sunday', $message);
+        $this->assertStringNotContainsString('tuesday', $message);
+
+        $this->assertSame('الأحد', $response->json('data.lesson_day_label'));
+        $this->assertSame('الثلاثاء', $response->json('data.date_day_label'));
+
+        // الأسماء الإنجليزية بتضل بالـ data للاستعمال البرمجي
+        $this->assertSame('sunday', $response->json('data.lesson_day'));
+    }
+
+    public function test_the_suggested_date_actually_works(): void
+    {
+        $this->recordAttendance();
+
+        $suggested = $this->actingAsSupervisor()->getJson(
+            "/api/supervisor/substitutions/available-teachers?weekly_schedule_id={$this->absentMathLesson->id}&date=2026-08-18"
+        )->json('data.suggested_dates.previous');
+
+        // التاريخ المقترح لازم يمرق — هاد كل معنى الاقتراح
+        $this->actingAsSupervisor()->getJson(
+            "/api/supervisor/substitutions/available-teachers?weekly_schedule_id={$this->absentMathLesson->id}&date={$suggested}"
+        )->assertOk();
+    }
+
     public function test_a_missing_lesson_id_is_rejected(): void
     {
         $this->actingAsSupervisor()->getJson(
