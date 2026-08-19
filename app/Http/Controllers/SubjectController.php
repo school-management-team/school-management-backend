@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\Subject;
+use App\Models\Teacher;
+use App\Models\TeacherAssignment;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -55,6 +57,10 @@ class SubjectController extends Controller
             'stage_ids.*' => 'required_with:stage_ids|exists:stages,id',
         ]);
 
+        if (count($validated) === 0) {
+            return $this->nothingToUpdate();
+        }
+
         return DB::transaction(function () use ($validated, $subject) {
             $subject->update([
                 'name' => $validated['name'] ?? $subject->name,
@@ -78,11 +84,24 @@ class SubjectController extends Controller
 
     public function destroy(Subject $subject)
     {
+        $teachersCount = Teacher::where('subject_id', $subject->id)->count();
+
+        if ($teachersCount > 0) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot delete a subject used as a teacher specialization',
+                'data' => ['teachers_count' => $teachersCount],
+            ], 422);
+        }
+
+        $assignmentsCount = TeacherAssignment::where('subject_id', $subject->id)->count();
+
         $subject->delete();
 
         return response()->json([
             'success' => true,
             'message' => 'Subject deleted successfully',
+            'data' => ['deleted_assignments' => $assignmentsCount],
         ]);
     }
 }

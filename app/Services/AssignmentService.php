@@ -143,28 +143,43 @@ class AssignmentService
     return $assignments;
 }
 
-    // نسبة إنجاز اليوم (بطاقة "إنجازك اليوم")
-    public function todayProgressForStudent(Student $student): array
-    {
-        $today = $this->todayForStudent($student);
-        $total = $today->count();
-
-        if ($total === 0) {
-            return ['completed' => 0, 'total' => 0, 'percentage' => 0];
-        }
-
-        $completedCount = StudentAssignmentStatus::where('student_id', $student->id)
-            ->whereIn('assignment_id', $today->pluck('id'))
-            ->where('status', 'completed')
-            ->count();
-
-        return [
-            'completed' => $completedCount,
-            'total' => $total,
-            'percentage' => (int) round(($completedCount / $total) * 100),
-        ];
+    // نسبة إنجاز اليوم: من كل المهام اللي موعدها لسا ما اجا، كم أنجزه الطالب اليوم بالذات
+public function todayProgressForStudent(Student $student): array
+{
+    if (!$student->section_id) {
+        return ['completed' => 0, 'total' => 0, 'percentage' => 0];
     }
 
+    $today = now()->toDateString();
+
+    // 1. المهام المستقبلية (اليوم أو بعد)
+    $futureAssignments = Assignment::whereHas('teacherAssignment', fn ($q) => $q->where('section_id', $student->section_id))
+        ->whereDate('due_date', '>=', $today)
+        ->pluck('id'); // نجيب الـ IDs
+
+    $totalNotYetDue = $futureAssignments->count();
+
+    if ($totalNotYetDue === 0) {
+        return ['completed' => 0, 'total' => 0, 'percentage' => 0];
+    }
+
+    // 2. المهام المنجزة اليوم من بين هذه المهام فقط
+    $completedToday = StudentAssignmentStatus::where('student_id', $student->id)
+        ->where('status', 'completed')
+        ->whereDate('updated_at', $today)
+        ->whereIn('assignment_id', $futureAssignments) // نفس المهام بالضبط
+        ->distinct('assignment_id') // لو في تكرار
+        ->count('assignment_id');
+
+    // 3. تأكد أن البسط لا يزيد عن المقام
+    $completedToday = min($completedToday, $totalNotYetDue);
+
+    return [
+        'completed' => $completedToday,
+        'total' => $totalNotYetDue,
+        'percentage' => (int) round(($completedToday / $totalNotYetDue) * 100),
+    ];
+}
     // زر "تسليم" = تحديد المهمة كمكتملة (شخصي بحت، بدون إشعار للمعلم)
     public function markCompleted(Student $student, int $assignmentId): StudentAssignmentStatus
     {
@@ -221,25 +236,25 @@ public function recentActivityForStudent(Student $student, int $limit = 10): arr
     return $activities->sortByDesc('date')->take($limit)->values()->toArray();
 }
 
-// أضف هذا التابع بأسفل AssignmentService
 
 // تفاصيل مهام اليوم مع حالة كل واحدة (لزر "تفاصيل التقدم")
+// تفاصيل المهام اللي أنجزها الطالب اليوم بالذات (من ضمن المهام غير المستحقة بعد)
 public function todayDetailedForStudent(Student $student)
 {
-    $assignments = $this->todayForStudent($student);
-
-    if ($assignments->isEmpty()) {
+    if (!$student->section_id) {
         return collect();
     }
 
-    $statuses = StudentAssignmentStatus::where('student_id', $student->id)
-        ->whereIn('assignment_id', $assignments->pluck('id'))
-        ->pluck('status', 'assignment_id');
+    $today = now()->toDateString();
 
-    foreach ($assignments as $assignment) {
-        $assignment->status = $statuses->get($assignment->id) ?? 'in_progress';
-    }
-
-    return $assignments;
+    return Assignment::whereHas('teacherAssignment', fn ($q) => $q->where('section_id', $student->section_id))
+        ->whereDate('due_date', '>=', $today)
+        ->whereHas('studentStatuses', function ($q) use ($student, $today) {
+            $q->where('student_id', $student->id)
+              ->where('status', 'completed')
+              ->whereDate('updated_at', $today);
+        })
+        ->with('teacherAssignment.subject:id,name')
+        ->get();
 }
 }

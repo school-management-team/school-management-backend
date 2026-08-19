@@ -15,10 +15,18 @@ class DatabaseSeeder extends Seeder
             SubjectsSeeder::class,
             StageSubjectSeeder::class,
             UserSeeder::class,
+            SupervisorSeeder::class,
             TeacherAssignmentsSeeder::class,
+            StudentSectionSeeder::class,
+            GuardianSeeder::class,
+            AssignmentsSeeder::class,
+            StudentAssignmentStatusesSeeder::class,
+            //StudentFeeSeeder::class,
+            WeeklyScheduleSeeder::class,
             GradesSeeder::class,
 
             AttendanceSeeder::class,
+            AnnouncementSeeder::class,
         ]);
     }
 }

@@ -8,10 +8,18 @@ use App\Http\Controllers\AdminAcademicController;
 use App\Http\Controllers\StudentController;
 
 use App\Http\Controllers\ClassController;
+use App\Http\Controllers\GuardianController;
 use App\Http\Controllers\SectionController;
 use App\Http\Controllers\StudentSectionController;
 use App\Http\Controllers\SubjectController;
+use App\Http\Controllers\StudentFeeController;
+use App\Http\Controllers\StudentReportController;
+use App\Http\Controllers\SupervisorAnnouncementController;
+use App\Http\Controllers\SubstitutionController;
+use App\Http\Controllers\SupervisorAttendanceController;
 use App\Http\Controllers\TeacherAssignmentController;
+
+use App\Http\Controllers\WeeklyScheduleController;
 
 use Illuminate\Support\Facades\Route;
 
@@ -147,10 +155,13 @@ Route::middleware(['auth:sanctum', 'active', 'role:teacher'])->group(function ()
 });
 
 Route::middleware(['auth:sanctum', 'active', 'role:student'])->group(function () {
+
     Route::get('/student/dashboard', [StudentController::class, 'dashboard']);
+
     Route::get('/student/schedule/daily', [StudentController::class, 'dailySchedule']);
     Route::get('/student/schedule/weekly', [StudentController::class, 'weeklySchedule']);
     Route::get('/student/schedule/remainingHours', [StudentController::class, 'remainingHoursToday']);
+
     Route::get('/student/announcements', [StudentController::class, 'announcements']);
     Route::get('/student/announcements/upcoming', [StudentController::class, 'upcomingAnnouncements']);
     Route::get('/student/announcements/important-dates', [StudentController::class, 'importantAnnouncementDates']);
@@ -158,9 +169,11 @@ Route::middleware(['auth:sanctum', 'active', 'role:student'])->group(function ()
     Route::get('/student/announcements/month', [StudentController::class, 'announcementsForMonth']);
     Route::get('/student/announcements/day', [StudentController::class, 'announcementsForDay']);
     Route::get('/student/announcements/{id}', [StudentController::class, 'showAnnouncement']);
+
     Route::get('/student/assignments/with-status', [StudentController::class, 'assignmentsWithStatus']);
     Route::get('/student/assignments/progress', [StudentController::class, 'assignmentProgress']);
     Route::patch('/student/assignments/{assignmentId}/complete', [StudentController::class, 'completeAssignment']);
+    Route::get('/student/assignments/progress/details', [StudentController::class, 'assignmentProgressDetails']);
 
     Route::get('/student/grades', [StudentController::class, 'grades']);
     Route::get('/student/class-group', [StudentController::class, 'classGroup']);
@@ -171,10 +184,120 @@ Route::middleware(['auth:sanctum', 'active', 'role:student'])->group(function ()
     Route::get('/student/guardian-info', [StudentController::class, 'guardianInfo']);
     Route::put('/student/personal-info', [StudentController::class, 'updatePersonalInfo']);
     Route::get('/student/activity', [StudentController::class, 'recentActivity']);
-
-    Route::get('/student/assignments/progress/details', [StudentController::class, 'assignmentProgressDetails']);
-
+    Route::get('/student/courses', [StudentController::class, 'courses']);
 
 
+});
+
+
+
+Route::middleware(['auth:sanctum', 'active', 'role:supervisor,admin'])->prefix('supervisor')->group(function () {
+
+    Route::get('/classes', [ClassController::class, 'index']);
+    Route::post('/classes', [ClassController::class, 'store']);
+    Route::put('/classes/{schoolClass}', [ClassController::class, 'update']);
+
+    Route::get('/sections', [SectionController::class, 'index']);
+    Route::post('/sections', [SectionController::class, 'store']);
+    Route::put('/sections/{section}', [SectionController::class, 'update']);
+
+    Route::post('/students/assign-sections', [StudentSectionController::class, 'assign']);
+    Route::get('/students/sections-overview', [StudentSectionController::class, 'sectionsOverview']);
+    Route::post('/students/transfer-section', [StudentSectionController::class, 'transfer']);
+
+    Route::get('/subjects', [SubjectController::class, 'index']);
+    Route::post('/subjects', [SubjectController::class, 'store']);
+    Route::put('/subjects/{subject}', [SubjectController::class, 'update']);
+    Route::delete('/subjects/{subject}', [SubjectController::class, 'destroy']);
+
+    Route::get('/teacher-assignments', [TeacherAssignmentController::class, 'index']);
+    Route::post('/teacher-assignments', [TeacherAssignmentController::class, 'store']);
+    Route::put('/teacher-assignments/{teacherAssignment}', [TeacherAssignmentController::class, 'update']);
+    Route::delete('/teacher-assignments/{teacherAssignment}', [TeacherAssignmentController::class, 'destroy']);
+});
+
+Route::middleware(['auth:sanctum', 'active', 'role:supervisor'])->prefix('supervisor')->group(function () {
+
+    Route::get('/schedule/periods', [WeeklyScheduleController::class, 'periods']);
+
+    Route::get('/schedule/free-teachers', [WeeklyScheduleController::class, 'freeTeachers']);
+    Route::get('/schedule/section/{section}', [WeeklyScheduleController::class, 'sectionSchedule']);
+
+    Route::get('/schedule/teacher/{teacher}', [WeeklyScheduleController::class, 'teacherSchedule']);
+    Route::post('/schedule', [WeeklyScheduleController::class, 'store']);
+    Route::post('/schedule/bulk', [WeeklyScheduleController::class, 'storeBulk']); Route::put('/schedule/{schedule}', [WeeklyScheduleController::class, 'update']);
+    Route::delete('/schedule/{schedule}', [WeeklyScheduleController::class, 'destroy']);
+
+
+    Route::get('/attendance/students', [SupervisorAttendanceController::class, 'studentSheet']);
+
+    Route::post('/attendance/students', [SupervisorAttendanceController::class, 'storeStudentAttendance']);
+
+    Route::get('/attendance/teachers', [SupervisorAttendanceController::class, 'teacherSheet']);
+
+    Route::post('/attendance/teachers', [SupervisorAttendanceController::class, 'storeTeacherAttendance']);
+    Route::get('/announcements', [SupervisorAnnouncementController::class, 'index']);
+    Route::get('/announcements/holidays', [SupervisorAnnouncementController::class, 'holidays']);
+    Route::get('/announcements/day-status', [SupervisorAnnouncementController::class, 'dayStatus']);
+
+    Route::get('/announcements/{announcement}', [SupervisorAnnouncementController::class, 'show']);
+
+
+    Route::post('/announcements', [SupervisorAnnouncementController::class, 'store']);
+
+    Route::post('/announcements/{announcement}', [SupervisorAnnouncementController::class, 'update']);
+
+    Route::delete('/announcements/{announcement}', [SupervisorAnnouncementController::class, 'destroy']);
+
+
+    Route::get('/fees', [StudentFeeController::class, 'index']);
+
+    Route::post('/fees', [StudentFeeController::class, 'store']);
+
+    Route::get('/fees/{fee}', [StudentFeeController::class, 'show']);
+
+    Route::put('/fees/{fee}', [StudentFeeController::class, 'update']);
+
+    Route::post('/fees/{fee}/payments', [StudentFeeController::class, 'storePayment']);
+
+    Route::delete('/fee-payments/{payment}', [StudentFeeController::class, 'destroyPayment']);
+
+
+    Route::get('/students/search', [StudentReportController::class, 'search']);
+
+    Route::get('/students/{student}/report-card', [StudentReportController::class, 'reportCard']);
+
+    Route::get('/substitutions/absent-lessons', [SubstitutionController::class, 'absentLessons']);
+
+    // المرشحين لتغطية حصة، مرتبين: نفس المادة أولاً ثم الأقل عبئاً هالأسبوع
+    // ?weekly_schedule_id= &date=
+    Route::get('/substitutions/available-teachers', [SubstitutionController::class, 'availableTeachers']);
+
+    // ?date= &status=assigned|completed|cancelled
+    Route::get('/substitutions', [SubstitutionController::class, 'index']);
+
+    // تعيين بديل — بيفحص إنو موجود بالمدرسة وفاضي ومش مكلّف بتعويض تاني
+    Route::post('/substitutions', [SubstitutionController::class, 'store']);
+
+    // تحديث الحالة: تم التنفيذ أو إلغاء (الإلغاء بيحرّر البديل)
+    Route::patch('/substitutions/{substitution}/status', [SubstitutionController::class, 'updateStatus']);
+});
+
+// ==================== Guardian ====================
+
+Route::middleware(['auth:sanctum', 'active', 'role:guardian'])->prefix('guardian')->group(function () {
+
+
+    Route::get('/children', [GuardianController::class, 'children']);
+    Route::get('/children/{student}/attendance', [GuardianController::class, 'attendance']);
+
+    Route::get('/children/{student}/attendance/summary', [GuardianController::class, 'attendanceSummary']);
+
+
+    Route::get('/children/{student}/grades', [GuardianController::class, 'grades']);
+    Route::get('/children/{student}/fees', [GuardianController::class, 'fees']);
+
+    // الجدول الأسبوعي — ?date= بترجّع حصص ذاك اليوم فقط مع البديل إن وُجد
+    Route::get('/children/{student}/schedule', [GuardianController::class, 'schedule']);
 
 });

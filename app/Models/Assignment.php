@@ -16,6 +16,7 @@ class Assignment extends Model
     ];
 
     protected $casts = ['due_date' => 'date'];
+    protected $appends = ['attachment_url'];
 
     public function teacherAssignment(): BelongsTo
     {
@@ -26,4 +27,10 @@ class Assignment extends Model
     {
         return $this->hasMany(StudentAssignmentStatus::class);
     }
+
+
+public function getAttachmentUrlAttribute(): ?string
+{
+    return $this->attachment_path ? asset('storage/' . $this->attachment_path) : null;
+}
 }

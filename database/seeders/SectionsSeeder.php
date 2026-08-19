@@ -10,13 +10,22 @@ class SectionsSeeder extends Seeder
 {
     public function run(): void
     {
-        SchoolClass::all()->each(function ($class) {
+        $created = 0;
+
+        foreach (SchoolClass::all() as $class) {
             foreach (['أ', 'ب'] as $name) {
                 Section::firstOrCreate(
                     ['class_id' => $class->id, 'name' => $name],
-                    ['capacity' => 30] // القيمة الثابتة
+
+
+                    ['capacity' => 30]
                 );
+
+                $created++;
+
             }
-        });
+        }
+
+        $this->command?->info("شعب: {$created}");
     }
 }

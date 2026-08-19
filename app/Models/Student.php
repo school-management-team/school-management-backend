@@ -36,4 +36,5 @@ class Student extends Model
     public function section(): BelongsTo { return $this->belongsTo(Section::class); }
     public function attendances(): HasMany { return $this->hasMany(Attendance::class); }
     public function grades(): HasMany { return $this->hasMany(Grade::class); }
+    public function fees(): HasMany { return $this->hasMany(StudentFee::class); }
 }

@@ -363,11 +363,19 @@ public function recentActivity(Request $request)
 
     return response()->json(['success' => true, 'data' => $activities]);
 }
-// StudentController — أضف
 public function assignmentProgressDetails(Request $request)
 {
     $assignments = $this->assignmentService->todayDetailedForStudent($request->user()->student);
 
     return response()->json(['success' => true, 'data' => $assignments]);
 }
+
+public function courses(Request $request)
+{
+    $courses = $this->gradeService->coursesForStudent($request->user()->student);
+
+    return response()->json(['success' => true, 'data' => $courses]);
+}
+
+
 }
