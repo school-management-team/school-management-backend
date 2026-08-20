@@ -507,6 +507,21 @@ class SubstitutionTest extends TestCase
             ->assertJsonPath('data.date_day', 'monday');
     }
 
+    public function test_omitting_the_date_falls_back_to_the_lesson_own_day(): void
+    {
+        /*
+         | الحصة يوم أحد. لو ما بعتنا تاريخ، ما بصير ناخد تاريخ اليوم
+         | ونرفض الطلب لأنه ما وافق — منحسب أقرب أحد لحالنا.
+         */
+        $date = $this->actingAsSupervisor()->getJson(
+            "/api/supervisor/substitutions/available-teachers?weekly_schedule_id={$this->absentMathLesson->id}"
+        )
+            ->assertOk()
+            ->json('data.date');
+
+        $this->assertSame('sunday', strtolower(\Carbon\Carbon::parse($date)->format('l')));
+    }
+
     public function test_the_mismatch_suggests_the_right_dates(): void
     {
         $this->recordAttendance();

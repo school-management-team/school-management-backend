@@ -6,12 +6,20 @@ use App\Models\Section;
 use App\Models\Teacher;
 use App\Models\TeacherAssignment;
 use App\Models\WeeklySchedule;
+use App\Services\SchoolCalendarService;
 use App\Services\WeeklyScheduleService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class WeeklyScheduleController extends Controller
 {
+    protected $calendarService;
+
+    public function __construct(SchoolCalendarService $calendarService)
+    {
+        $this->calendarService = $calendarService;
+    }
+
     /** تعريف الحصص وأيام الدوام — تتعبّى فيها الواجهة شبكة الجدول */
     public function periods()
     {
@@ -154,14 +162,24 @@ class WeeklyScheduleController extends Controller
 
         $day = $validated['day_of_week'];
         $periodNumber = $validated['period_number'];
+        $period = $this->classPeriod($periodNumber);
 
-        $query = Teacher::with('user:id,user_name', 'subject:id,name');
+        // كم معلم منفحص أصلاً؟ (بعد فلتر المادة إن وُجد) — لازمنا للرسالة
+        $pool = Teacher::query();
+
+        if ($request->filled('subject_id')) {
+            $pool->where('subject_id', $request->subject_id);
+        }
+
+        $poolCount = $pool->count();
+
+        $query = Teacher::with('user:id,user_name', 'subject:id,name', 'stage:id,name');
 
         if ($request->filled('subject_id')) {
             $query->where('subject_id', $request->subject_id);
         }
 
-        // المعلم الفاضي = ما عندو ولا حصة بهاليوم وهالرقم
+        // المعلم الفاضي = ما عندو ولا حصة بهاليوم وهالرقم بالجدول الأسبوعي
         $query->whereDoesntHave('weeklySchedules', function ($schedule) use ($day, $periodNumber) {
             $schedule->where('day_of_week', $day)->where('period_number', $periodNumber);
         });
@@ -175,22 +193,42 @@ class WeeklyScheduleController extends Controller
                 'teacher_id' => $teacher->id,
                 'teacher_name' => $teacher->user ? $teacher->user->user_name : null,
                 'subject' => $teacher->subject ? $teacher->subject->name : null,
+                'stage' => $teacher->stage ? $teacher->stage->name : null,
                 'weekly_lessons_count' => $teacher->weekly_schedules_count,
             ];
         }
 
-        // الأقل نصاباً أولاً
+        // الأقل نصاباً أولاً — حتى ينوزّع العبء بالعدل وقت بناء الجدول
         usort($teachers, function ($a, $b) {
             return $a['weekly_lessons_count'] - $b['weekly_lessons_count'];
         });
 
+        $free = count($teachers);
+        $busy = $poolCount - $free;
+        $dayLabel = $this->calendarService->dayLabel($day);
+        $scope = $request->filled('subject_id') ? 'معلمي هذه المادة' : 'المعلمين';
+
+        if ($poolCount === 0) {
+            $message = 'لا يوجد معلمون مطابقون للفلتر المُرسل';
+        } elseif ($free === 0) {
+            $message = "كل {$scope} ({$poolCount}) عندهم حصة يوم {$dayLabel} بالحصة {$periodNumber}";
+        } else {
+            $message = "من أصل {$poolCount} من {$scope}، {$free} فاضي يوم {$dayLabel} بالحصة {$periodNumber}";
+        }
+
         return response()->json([
             'success' => true,
+            'message' => $message,
             'data' => [
                 'day_of_week' => $day,
+                'day_label' => $dayLabel,
                 'period_number' => $periodNumber,
+                'starts_at' => $period['start'],
+                'ends_at' => $period['end'],
                 'free_teachers' => $teachers,
-                'total' => count($teachers),
+                'total' => $free,
+                'busy_count' => $busy,
+                'checked_count' => $poolCount,
             ],
         ]);
     }

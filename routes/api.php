@@ -9,6 +9,7 @@ use App\Http\Controllers\StudentController;
 
 use App\Http\Controllers\ClassController;
 use App\Http\Controllers\GuardianController;
+use App\Http\Controllers\GuardianProfileController;
 use App\Http\Controllers\SectionController;
 use App\Http\Controllers\StudentSectionController;
 use App\Http\Controllers\SubjectController;
@@ -21,6 +22,7 @@ use App\Http\Controllers\TeacherAssignmentController;
 
 use App\Http\Controllers\WeeklyScheduleController;
 
+use App\Http\Controllers\SupervisorProfileController;
 use Illuminate\Support\Facades\Route;
 
 // ==================== Public Routes ====================
@@ -218,6 +220,17 @@ Route::middleware(['auth:sanctum', 'active', 'role:supervisor,admin'])->prefix('
 
 Route::middleware(['auth:sanctum', 'active', 'role:supervisor'])->prefix('supervisor')->group(function () {
 
+    // البروفايل كامل + ملخّص نشاط الموجّه بالنظام
+    Route::get('/profile', [SupervisorProfileController::class, 'show']);
+
+    // تعديل المعلومات الشخصية والمهنية معاً
+    Route::put('/profile', [SupervisorProfileController::class, 'update']);
+
+    // السيرة الذاتية — رفع/استبدال، وتحميل
+    Route::post('/profile/cv', [SupervisorProfileController::class, 'uploadCv']);
+    Route::get('/profile/cv', [SupervisorProfileController::class, 'downloadCv']);
+
+
 
     Route::get('/schedule/periods', [WeeklyScheduleController::class, 'periods']);
 
@@ -288,6 +301,11 @@ Route::middleware(['auth:sanctum', 'active', 'role:supervisor'])->prefix('superv
 
 Route::middleware(['auth:sanctum', 'active', 'role:guardian'])->prefix('guardian')->group(function () {
 
+    // بروفايل ولي الأمر نفسه: معلوماته الشخصية + صلة القرابة وعدد الأولاد
+    Route::get('/profile', [GuardianProfileController::class, 'show']);
+
+    // تعديل معلوماته الشخصية وصلة القرابة بنفس الطلب
+    Route::put('/profile', [GuardianProfileController::class, 'update']);
 
     Route::get('/children', [GuardianController::class, 'children']);
     Route::get('/children/{student}/attendance', [GuardianController::class, 'attendance']);

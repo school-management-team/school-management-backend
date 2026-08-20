@@ -183,28 +183,30 @@ class SubstitutionController extends Controller
             'same_subject' => 'sometimes|boolean',
         ]);
 
-        $date = $validated['date'] ?? now()->toDateString();
         $sameSubjectOnly = $request->boolean('same_subject');
 
         $lesson = WeeklySchedule::with(['teacher.user', 'teacherAssignment.subject', 'teacherAssignment.section.schoolClass'])
             ->findOrFail($validated['weekly_schedule_id']);
 
+        /*
+         | التاريخ اختياري. لو ما بعتو، منحطّ أقرب يوم بتنعطى فيه هالحصة —
+         | مش تاريخ اليوم. الحصة إلها يوم ثابت بالأسبوع، فتاريخ اليوم ممكن
+         | ما يوافقه، وما بصير نرفض طلب المستخدم بسبب تاريخ هو ما كتبه.
+         */
+        $date = $validated['date'] ?? $this->nextOccurrenceOf($lesson->day_of_week);
+
         $dateDay = $this->dayOfWeek($date);
 
         if ($lesson->day_of_week !== $dateDay) {
-            /*
-             | ما بيكفي نقول "التاريخ غلط" — منقترح أقرب تاريخين يوافقان
-             | يوم الحصة، حتى ما يضطر المستخدم يحسبهن بنفسه.
-             */
+            // التاريخ مكتوب من المستخدم وما بيوافق يوم الحصة — منقترح البديل
             $nearest = $this->calendarService->nearestDatesFor($lesson->day_of_week, $date);
             $lessonDayLabel = $this->calendarService->dayLabel($lesson->day_of_week);
             $dateDayLabel = $this->calendarService->dayLabel($dateDay);
 
             return response()->json([
                 'success' => false,
-                'message' => "الحصة رقم {$lesson->id} مجدولة يوم {$lessonDayLabel}، "
-                    ."والتاريخ {$date} يوم {$dateDayLabel}. "
-                    ."أقرب {$lessonDayLabel} هو {$nearest['next']} (والسابق {$nearest['previous']})",
+                'message' => "هذه الحصة تُعطى يوم {$lessonDayLabel}، و{$date} يوم {$dateDayLabel} — "
+                    ."ما في حصة هذا اليوم. جرّب {$nearest['next']}",
                 'data' => [
                     'lesson_day' => $lesson->day_of_week,
                     'lesson_day_label' => $lessonDayLabel,
@@ -620,6 +622,18 @@ class SubstitutionController extends Controller
     }
 
     /** تحويل التاريخ ليوم مدرسي، أو null إذا كان جمعة/سبت */
+    /** أقرب تاريخ بتنعطى فيه حصة هذا اليوم — واليوم نفسه بينحسب إذا وافق */
+    private function nextOccurrenceOf(string $day): string
+    {
+        $today = now()->toDateString();
+
+        if ($this->dayOfWeek($today) === $day) {
+            return $today;
+        }
+
+        return $this->calendarService->nearestDatesFor($day, $today)['next'];
+    }
+
     private function dayOfWeek(string $date): ?string
     {
         return $this->calendarService->schoolDayOf($date);

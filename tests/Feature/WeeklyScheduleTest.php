@@ -15,6 +15,7 @@ class WeeklyScheduleTest extends TestCase
     private $supervisor;
     private $sectionA;
     private $sectionB;
+    private $math;
     private $mathAssignmentA;
     private $arabicAssignmentA;
     private $mathAssignmentB;
@@ -27,6 +28,7 @@ class WeeklyScheduleTest extends TestCase
 
         $stage = $this->makeStage();
         $math = $this->makeSubject('رياضيات');
+        $this->math = $math;
         $arabic = $this->makeSubject('عربي');
 
         $mathTeacher = $this->makeTeacher($math, $stage, 'Math Teacher');
@@ -268,6 +270,44 @@ class WeeklyScheduleTest extends TestCase
         // معلم الرياضيات صار مشغول، بيضل معلم العربي بس
         $response->assertJsonPath('data.total', 1)
             ->assertJsonPath('data.free_teachers.0.subject', 'عربي');
+    }
+
+    public function test_free_teachers_explains_the_count_it_returned(): void
+    {
+        $this->addLesson($this->mathAssignmentA->id, 'sunday', 1)->assertCreated();
+
+        $data = $this->actingAsSupervisor()->getJson(
+            '/api/supervisor/schedule/free-teachers?day_of_week=sunday&period_number=1'
+        )->assertOk()
+            ->assertJsonPath('data.day_label', 'الأحد')
+            ->assertJsonPath('data.busy_count', 1)
+            ->json();
+
+        // الرسالة بتقول من أصل كم، وكم فاضي، وبأي خانة — بدون ما يعدّ المستخدم
+        $this->assertStringContainsString('الأحد', $data['message']);
+        $this->assertStringContainsString((string) $data['data']['checked_count'], $data['message']);
+    }
+
+    public function test_free_teachers_says_so_when_everyone_is_busy(): void
+    {
+        $this->addLesson($this->mathAssignmentA->id, 'sunday', 1)->assertCreated();
+
+        // نفلتر على مادة الرياضيات وحدها — ومعلمها مشغول بهالخانة
+        $this->actingAsSupervisor()->getJson(
+            '/api/supervisor/schedule/free-teachers?day_of_week=sunday&period_number=1'
+            .'&subject_id='.$this->math->id
+        )->assertOk()
+            ->assertJsonPath('data.total', 0)
+            ->assertJsonPath('message', 'كل معلمي هذه المادة (1) عندهم حصة يوم الأحد بالحصة 1');
+    }
+
+    public function test_free_teachers_reports_the_period_time(): void
+    {
+        $this->actingAsSupervisor()->getJson(
+            '/api/supervisor/schedule/free-teachers?day_of_week=monday&period_number=2'
+        )->assertOk()
+            ->assertJsonPath('data.starts_at', config('school.periods.2.start'))
+            ->assertJsonPath('data.ends_at', config('school.periods.2.end'));
     }
 
     public function test_non_supervisors_are_blocked(): void
