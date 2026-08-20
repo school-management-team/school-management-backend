@@ -21,8 +21,6 @@ use App\Http\Controllers\TeacherAssignmentController;
 
 use App\Http\Controllers\WeeklyScheduleController;
 
-use App\Http\Controllers\NotificationController;
-use App\Http\Controllers\NotificationSenderController;
 use Illuminate\Support\Facades\Route;
 
 // ==================== Public Routes ====================
@@ -62,17 +60,6 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::post('/profile/photo', [AuthController::class, 'updateProfilePhoto']);
 
     Route::get('/teachers/{teacher}/document', [AdminUserController::class, 'downloadTeacherDocument']);
-
-    /*
-     | ---------- الإشعارات (كل الأدوار) ----------
-     | البث اللحظي بيوصل الإشعار وقت وقوعه عبر Reverb.
-     | هدول النقاط للأرشيف: فتح التطبيق، تصفّح القديم، وعدّاد غير المقروء.
-     */
-    Route::get('/notifications', [NotificationController::class, 'index']);
-    Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
-    Route::patch('/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
-    Route::patch('/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
-    Route::delete('/notifications/{id}', [NotificationController::class, 'destroy']);
 });
 
 // ==================== Admin ====================
@@ -115,9 +102,6 @@ Route::middleware(['auth:sanctum', 'active', 'role:admin'])->prefix('admin')->gr
 Route::middleware(['auth:sanctum', 'active', 'role:teacher'])->group(function () {
 
     Route::get('/teacher/profile', [TeacherController::class, 'profile']);
-
-    // إعلان من المعلم لطلاب شعبة بيدرّسها
-    Route::post('/teacher/notifications/class-announcement', [NotificationSenderController::class, 'classAnnouncement']);
 
     Route::get('/teacher/announcements', [TeacherController::class, 'announcements']);
     Route::get('/teacher/announcements/upcoming', [TeacherController::class, 'upcomingAnnouncements']);
@@ -283,14 +267,6 @@ Route::middleware(['auth:sanctum', 'active', 'role:supervisor'])->prefix('superv
     Route::get('/students/search', [StudentReportController::class, 'search']);
 
     Route::get('/students/{student}/report-card', [StudentReportController::class, 'reportCard']);
-
-    // ---------- إشعارات الموجّه ----------
-
-    // تنبيه تراجع دراسي → لمعلمي الطالب وأولياء أمره
-    Route::post('/notifications/academic-drop', [NotificationSenderController::class, 'academicDrop']);
-
-    // موعد اجتماع → لولي الأمر (واختيارياً للمعلمين)
-    Route::post('/notifications/parent-meeting', [NotificationSenderController::class, 'parentMeeting']);
 
     Route::get('/substitutions/absent-lessons', [SubstitutionController::class, 'absentLessons']);
 

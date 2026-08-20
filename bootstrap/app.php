@@ -21,19 +21,6 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
-    /*
-     | نقطة مصادقة قنوات البث.
-     |
-     | الافتراضي بلارافيل بيعتمد على جلسات المتصفح، وواجهاتنا (React و
-     | Flutter) بتستعمل توكن Sanctum. فمنسجّلها تحت api مع auth:sanctum
-     | حتى تقبل هيدر Authorization: Bearer.
-     |
-     | العنوان النهائي للواجهات:  POST /api/broadcasting/auth
-     */
-    ->withBroadcasting(
-        __DIR__.'/../routes/channels.php',
-        ['prefix' => 'api', 'middleware' => ['api', 'auth:sanctum']],
-    )
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->alias([
             'role'=>CheckRole::class,

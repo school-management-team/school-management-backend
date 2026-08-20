@@ -2,8 +2,6 @@
 namespace App\Services;
 
 use App\Models\Assignment;
-use App\Notifications\AssignmentPublished;
-use App\Services\Notifications\NotificationDispatcher;
 use App\Models\Attendance;
 use App\Models\Student;
 use App\Models\StudentAssignmentStatus;
@@ -47,7 +45,7 @@ class AssignmentService
 
     public function create(TeacherAssignment $teacherAssignment, array $data): Assignment
     {
-        $assignment = Assignment::create([
+        return Assignment::create([
             'teacher_assignment_id' => $teacherAssignment->id,
             'title' => $data['title'],
             'description' => $data['description'] ?? null,
@@ -56,31 +54,6 @@ class AssignmentService
             'attachment_path' => $data['attachment_path'] ?? null,
             'attachment_link' => $data['attachment_link'] ?? null,
         ]);
-
-        $this->notifyStudents($assignment, $teacherAssignment);
-
-        return $assignment;
-    }
-
-    /**
-     * إشعار طلاب الشعبة بالواجب الجديد.
-     *
-     * الإرسال بينحط بالطابور (الإشعار ShouldQueue)، فما بيأخّر الرد.
-     * ولو فشل الإشعار لأي سبب، الواجب بيضل محفوظ — إنشاء الواجب أهم من
-     * إشعاره، وما بصير خطأ ببث لحظي يوقّع العملية كلها.
-     */
-    protected function notifyStudents(Assignment $assignment, TeacherAssignment $teacherAssignment): void
-    {
-        try {
-            $dispatcher = app(NotificationDispatcher::class);
-
-            $dispatcher->send(
-                $dispatcher->to()->studentsOfSection($teacherAssignment->section_id),
-                new AssignmentPublished($assignment->load('teacherAssignment.subject', 'teacherAssignment.teacher.user'))
-            );
-        } catch (\Throwable $e) {
-            report($e);
-        }
     }
 
     public function list(Teacher $teacher, array $filters)
