@@ -10,11 +10,16 @@ class AssignmentsSeeder extends Seeder
 {
     public function run(): void
     {
-        if (TeacherAssignment::count() === 0) {
+        $assignmentIds = TeacherAssignment::pluck('id');
+
+        if ($assignmentIds->isEmpty()) {
             $this->command->warn('لا يوجد تعيينات معلمين. قم بتشغيل TeacherAssignmentsSeeder أولاً.');
             return;
         }
 
-        Assignment::factory()->count(30)->create();
+        Assignment::factory()
+            ->count(30)
+            ->sequence(fn () => ['teacher_assignment_id' => $assignmentIds->random()])
+            ->create();
     }
 }

@@ -89,9 +89,22 @@ trait BuildsSchoolData
         return Stage::firstOrCreate(['name' => $name]);
     }
 
-    protected function makeSubject(string $name): Subject
+    protected function makeSubject(string $name, ...$stages): Subject
     {
-        return Subject::create(['name' => $name, 'passing_grade' => 50, 'description' => $name]);
+        $subject = Subject::create(['name' => $name, 'passing_grade' => 50, 'description' => $name]);
+
+        foreach ($stages as $stage) {
+            $this->linkSubjectToStage($subject, $stage);
+        }
+
+        return $subject;
+    }
+
+    protected function linkSubjectToStage(Subject $subject, Stage $stage): Subject
+    {
+        $subject->stages()->syncWithoutDetaching([$stage->id]);
+
+        return $subject;
     }
 
     protected function makeAssignment(Teacher $teacher, Subject $subject, Section $section): TeacherAssignment

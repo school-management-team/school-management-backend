@@ -213,7 +213,23 @@ public function assignmentProgress(Request $request)
 
 public function completeAssignment(Request $request, int $assignmentId)
 {
-    $status = $this->assignmentService->markCompleted($request->user()->student, $assignmentId);
+    $student = $request->user()->student;
+
+    $assignment = \App\Models\Assignment::with('teacherAssignment')->find($assignmentId);
+
+    if (!$assignment) {
+        return response()->json(['success' => false, 'message' => 'الواجب غير موجود'], 404);
+    }
+
+    if (!$student->section_id
+        || $assignment->teacherAssignment?->section_id !== $student->section_id) {
+        return response()->json([
+            'success' => false,
+            'message' => 'هذا الواجب ليس لشعبتك',
+        ], 403);
+    }
+
+    $status = $this->assignmentService->markCompleted($student, $assignmentId);
 
     return response()->json(['success' => true, 'message' => 'تم إنهاء المهمة', 'data' => $status]);
 }
@@ -245,7 +261,6 @@ public function classmates(Request $request)
         ->map(fn ($classmate) => [
             'student_id' => $classmate->id,
             'user_name' => $classmate->user->user_name,
-            'phone' => $classmate->user->phone,
             'profile_photo_url' => $classmate->user->profile_photo_path
                 ? asset('storage/' . $classmate->user->profile_photo_path)
                 : null,

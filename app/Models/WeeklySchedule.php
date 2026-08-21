@@ -28,6 +28,29 @@ class WeeklySchedule extends Model
                 ? TeacherAssignment::whereKey($schedule->teacher_assignment_id)->value('section_id')
                 : null;
         });
+        static::updated(function (self $schedule) {
+            $movedPeriod = $schedule->wasChanged('period_number');
+            $movedDay = $schedule->wasChanged('day_of_week');
+
+            if (!$movedPeriod && !$movedDay) {
+                return;
+            }
+
+            $affected = $schedule->substitutions()
+                ->where('status', '!=', 'cancelled')
+                ->whereDate('date', '>=', now()->toDateString());
+
+            if ($movedDay) {
+                $affected->update([
+                    'status' => 'cancelled',
+                    'note' => 'أُلغي تلقائياً: نُقلت الحصة إلى يوم آخر في الجدول',
+                ]);
+
+                return;
+            }
+
+            $affected->update(['period_number' => $schedule->period_number]);
+        });
     }
 
     public function teacher(): BelongsTo { return $this->belongsTo(Teacher::class); }
@@ -36,8 +59,12 @@ class WeeklySchedule extends Model
     public function lessonPlans(): HasMany { return $this->hasMany(LessonPlan::class); }
     public function substitutions(): HasMany { return $this->hasMany(LessonSubstitution::class); }
 
-    public function getStatusAttribute(): string
+    public function getStatusAttribute($value): string
     {
+        if ($value !== null) {
+            return $value;
+        }
+
         $now = now()->format('H:i:s');
 
         if ($now < $this->start_time) return 'upcoming';

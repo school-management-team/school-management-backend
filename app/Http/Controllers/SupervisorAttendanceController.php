@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Attendance;
+use App\Models\LessonSubstitution;
 use App\Models\Section;
 use App\Models\Stage;
 use App\Models\Subject;
@@ -14,6 +15,11 @@ use Illuminate\Support\Facades\DB;
 
 class SupervisorAttendanceController extends Controller
 {
+    const ATTENDANCE_MESSAGES = [
+        'records.*.student_id.distinct' => 'الطالب مكرر أكثر من مرة في نفس الطلب',
+        'records.*.teacher_id.distinct' => 'المعلم مكرر أكثر من مرة في نفس الطلب',
+    ];
+
     protected $calendarService;
 
     public function __construct(SchoolCalendarService $calendarService)
@@ -84,11 +90,11 @@ class SupervisorAttendanceController extends Controller
             'section_id' => 'required|exists:sections,id',
             'date' => 'sometimes|date_format:Y-m-d',
             'records' => 'required|array|min:1',
-            'records.*.student_id' => 'required|exists:students,id',
+            'records.*.student_id' => 'required|exists:students,id|distinct',
             'records.*.status' => 'required|in:'.implode(',', config('school.attendance_statuses.student')),
             'records.*.excuse' => 'nullable|string|max:255',
             'records.*.left_at' => 'nullable|date_format:H:i',
-        ]);
+        ], self::ATTENDANCE_MESSAGES);
 
         $supervisorId = $this->supervisorId($request);
 
@@ -268,11 +274,11 @@ class SupervisorAttendanceController extends Controller
         $validated = $request->validate([
             'date' => 'sometimes|date_format:Y-m-d',
             'records' => 'required|array|min:1',
-            'records.*.teacher_id' => 'required|exists:teachers,id',
+            'records.*.teacher_id' => 'required|exists:teachers,id|distinct',
             'records.*.status' => 'required|in:'.implode(',', config('school.attendance_statuses.teacher')),
             'records.*.excuse' => 'nullable|string|max:255',
             'records.*.check_in_time' => 'nullable|date_format:H:i',
-        ]);
+        ], self::ATTENDANCE_MESSAGES);
 
         $supervisorId = $this->supervisorId($request);
 
@@ -316,10 +322,13 @@ class SupervisorAttendanceController extends Controller
 
         $awayCount = 0;
         $createdCount = 0;
+        $backAtSchool = [];
 
         foreach ($saved as $record) {
             if ($record->status === 'absent' || $record->status === 'excused') {
                 $awayCount++;
+            } else {
+                $backAtSchool[] = $record->teacher_id;
             }
 
             if ($record->wasRecentlyCreated) {
@@ -327,11 +336,27 @@ class SupervisorAttendanceController extends Controller
             }
         }
 
+        $cancelledSubstitutions = 0;
+
+        if ($backAtSchool !== []) {
+            $cancelledSubstitutions = LessonSubstitution::forDate($date)
+                ->active()
+                ->whereIn('absent_teacher_id', $backAtSchool)
+                ->update([
+                    'status' => 'cancelled',
+                    'note' => 'أُلغي تلقائياً: سُجّل المعلم حاضراً في هذا التاريخ',
+                ]);
+        }
+
         $updatedCount = count($saved) - $createdCount;
         $message = 'سجّلنا '.$createdCount.' حضور جديد';
 
         if ($updatedCount > 0) {
             $message .= ' وحدّثنا '.$updatedCount.' كان مسجّل مسبقاً';
+        }
+
+        if ($cancelledSubstitutions > 0) {
+            $message .= ' وألغينا '.$cancelledSubstitutions.' تعويض لمعلمين صاروا حاضرين';
         }
 
         return response()->json([
@@ -343,6 +368,7 @@ class SupervisorAttendanceController extends Controller
                 'created_count' => $createdCount,
                 'updated_count' => $updatedCount,
                 'away_count' => $awayCount,
+                'cancelled_substitutions' => $cancelledSubstitutions,
                 'records' => $saved,
             ],
         ], $createdCount > 0 ? 201 : 200);
@@ -454,10 +480,17 @@ class SupervisorAttendanceController extends Controller
         return $context;
     }
 
-    /** ما بينرصد حضور بعطلة رسمية ولا بيوم عطلة أسبوعية */
+    /** ما بينرصد حضور بعطلة رسمية ولا بيوم عطلة أسبوعية ولا بيوم لسا ما إجا */
     private function blockedDay(string $date)
     {
         $reason = $this->calendarService->nonSchoolDayReason($date);
+
+        if (!$reason && $date > now()->toDateString()) {
+            $reason = [
+                'reason' => 'future',
+                'message' => 'هذا التاريخ لم يأتِ بعد',
+            ];
+        }
 
         if (!$reason) {
             return null;

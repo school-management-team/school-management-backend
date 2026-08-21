@@ -13,7 +13,8 @@ class AssignmentFactory extends Factory
     public function definition(): array
     {
         return [
-            'teacher_assignment_id' => TeacherAssignment::factory(),
+            'teacher_assignment_id' => fn () => TeacherAssignment::inRandomOrder()->value('id')
+                ?? TeacherAssignment::factory(),
             'title' => fake()->sentence(),
             'description' => fake()->optional()->paragraph(),
             'due_date' => fake()->dateTimeBetween('now', '+1 month'),

@@ -42,7 +42,7 @@ class ClassController extends Controller
         if ($exists) {
             return response()->json([
                 'success' => false,
-                'message' => 'A class with the same order already exists in this stage',
+                'message' => 'يوجد صف بنفس الترتيب في هذه المرحلة',
             ], 422);
         }
 
@@ -54,7 +54,7 @@ class ClassController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Class created successfully',
+            'message' => 'تم إنشاء الصف بنجاح',
             'data' => $class->load('stage:id,name'),
         ], 201);
     }
@@ -88,15 +88,24 @@ public function update(Request $request, SchoolClass $schoolClass)
     if ($exists) {
         return response()->json([
             'success' => false,
-            'message' => 'Another class with the same order already exists in this stage',
+            'message' => 'يوجد صف آخر بنفس الترتيب في هذه المرحلة',
         ], 422);
     }
 
-    $schoolClass->update($request->only(['name', 'grade_order', 'stage_id']));
+    $schoolClass->fill($request->only(['name', 'grade_order', 'stage_id']));
+
+    if (!$schoolClass->isDirty()) {
+        return $this->noChangesMade($schoolClass->load('stage:id,name'));
+    }
+
+    $changed = array_keys($schoolClass->getDirty());
+    $schoolClass->save();
 
     return response()->json([
         'success' => true,
-        'message' => 'Class updated successfully',
+        'message' => 'تم تحديث الصف بنجاح',
+        'changed' => true,
+        'changed_fields' => $changed,
         'data' => $schoolClass->fresh()->load('stage:id,name'),
     ]);
 }

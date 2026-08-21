@@ -305,7 +305,7 @@ class AdminAcademicController extends Controller
         $computed = $gradeService->computeFinalGrades($assignment, $semester);
         $studentGrade = collect($computed)->firstWhere('student_id', $student->id);
 
-        if (!$studentGrade) {
+        if (!$studentGrade || $studentGrade['total_value'] === null) {
             continue;
         }
 

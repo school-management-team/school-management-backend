@@ -2,11 +2,11 @@
 
 namespace App\Models;
 
-use DB;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable
@@ -24,6 +24,12 @@ class User extends Authenticatable
         'status',
         'verification_code',
         'verification_expires_at',
+        'email_verified_at',
+        'last_login_at',
+        'password_changed_at',
+        'failed_attempts',
+        'locked_until',
+        'profile_photo_path',
     ];
 
     protected $hidden = [
@@ -253,7 +259,7 @@ public static function getNextStudentNumberForGrade(int $gradeOrder): string
     $end = $ranges[$gradeOrder]['end'];
 
     return DB::transaction(function () use ($gradeOrder, $start, $end) {
-        $lastStudent = Student::withTrashed()
+        $lastStudent = Student::query()
             ->whereHas('schoolClass', function ($query) use ($gradeOrder) {
                 $query->where('grade_order', $gradeOrder);
             })

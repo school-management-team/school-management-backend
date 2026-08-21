@@ -33,7 +33,7 @@ class UserSeeder extends Seeder
             ['physics@test.com', 'أستاذ الفيزياء', '0930000002', 'فيزياء', 'high_scientific'],
             ['arabic@test.com', 'أستاذ اللغة العربية', '0930000003', 'اللغة العربية', 'primary'],
             ['english@test.com', 'أستاذ اللغة الإنجليزية', '0930000004', 'اللغة الإنجليزية', 'primary'],
-            ['history@test.com', 'أستاذ التاريخ', '0930000005', 'التاريخ', 'primary'],
+            ['biology@test.com', 'أستاذ الأحياء', '0930000005', 'أحياء', 'primary'],
         ];
 
         foreach ($teachers as $row) {

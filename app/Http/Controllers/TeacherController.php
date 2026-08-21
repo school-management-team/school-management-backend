@@ -36,7 +36,7 @@ class TeacherController extends Controller
             'difficulty' => 'required|in:easy,medium,hard',
             'text' => 'required|string|max:2000',
             'model_answer' => 'nullable|required_if:type,essay|string|max:2000',
-            'choices' => 'required_if:type,multiple_choice,true_false|array',
+            'choices' => 'nullable|required_if:type,multiple_choice,true_false|array',
             'choices.*.text' => 'required_if:type,multiple_choice,true_false|string|max:255',
             'choices.*.is_correct' => 'required_if:type,multiple_choice,true_false|boolean',
         ]);
@@ -735,6 +735,18 @@ public function storeBulkGrades(Request $request, int $teacherAssignmentId)
 
     if (!$teacherAssignment) {
         abort(403);
+    }
+
+    $outsiders = $this->gradeService->studentsOutsideSection(
+        $teacherAssignment, array_column($request->input('grades'), 'student_id')
+    );
+
+    if (count($outsiders) > 0) {
+        return response()->json([
+            'success' => false,
+            'message' => 'بعض الطلاب غير منتمين لهذه الشعبة',
+            'data' => ['student_ids' => $outsiders],
+        ], 422);
     }
 
     try {

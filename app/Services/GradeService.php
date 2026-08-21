@@ -49,6 +49,22 @@ class GradeService
             ->exists();
     }
 
+    public function studentsOutsideSection(TeacherAssignment $teacherAssignment, array $studentIds): array
+    {
+        $ids = array_values(array_unique(array_map('intval', $studentIds)));
+
+        if ($ids === []) {
+            return [];
+        }
+
+        $inside = Student::whereIn('id', $ids)
+            ->where('section_id', $teacherAssignment->section_id)
+            ->pluck('id')
+            ->all();
+
+        return array_values(array_diff($ids, $inside));
+    }
+
     /*
      | دفتر العلامات مفتاحه (شعبة + مادة) — مش التكليف.
      | التكليف بيحدد الصلاحية بس (هل بتدرّس هالمادة لهالشعبة؟)، فلو أكتر من
@@ -98,6 +114,10 @@ class GradeService
             throw new \Exception('لا يمكن تعديل العلامات بعد اكتمالها ورفعها للاعتماد');
         }
 
+        if ($this->studentsOutsideSection($teacherAssignment, [$data['student_id']]) !== []) {
+            throw new \Exception('هذا الطالب غير منتمٍ لهذه الشعبة');
+        }
+
         $grade = Grade::updateOrCreate(
             [
                 'student_id' => $data['student_id'],
@@ -142,6 +162,12 @@ class GradeService
             throw new \Exception('لا يمكن تعديل العلامات بعد اكتمالها ورفعها للاعتماد');
         }
 
+        $outsiders = $this->studentsOutsideSection($teacherAssignment, array_column($grades, 'student_id'));
+
+        if ($outsiders !== []) {
+            throw new \Exception('بعض الطلاب غير منتمين لهذه الشعبة: '.implode('، ', $outsiders));
+        }
+
         foreach ($grades as $entry) {
             Grade::updateOrCreate(
                 [
@@ -182,14 +208,21 @@ class GradeService
             ];
 
             $total = 0;
+            $missing = 0;
 
             foreach ($this->components() as $type => $component) {
                 $value = $studentGrades->firstWhere('type', $type)?->value;
                 $row["{$type}_value"] = $value;
-                $total += ($value ?? 0) * $component['weight'] / 100;
+
+                if ($value === null) {
+                    $missing++;
+                    continue;
+                }
+
+                $total += $value * $component['weight'] / 100;
             }
 
-            $row['total_value'] = round($total, 2);
+            $row['total_value'] = $missing === 0 ? round($total, 2) : null;
             $results[] = $row;
         }
 

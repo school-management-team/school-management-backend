@@ -28,7 +28,7 @@ class StudentSectionController extends Controller
             if ($sections->isEmpty()) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'No sections found for this class',
+                    'message' => 'لا توجد شعب في هذا الصف',
                 ], 404);
             }
 
@@ -97,8 +97,8 @@ class StudentSectionController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => $reset
-                    ? 'Students redistributed successfully'
-                    : 'Students assigned successfully',
+                    ? 'تمت إعادة توزيع الطلاب بنجاح'
+                    : 'تم توزيع الطلاب على الشعب بنجاح',
                 'data' => [
                     'sections' => $sectionSummaries,
                     'assigned' => $assigned,
@@ -190,7 +190,7 @@ public function transfer(Request $request)
     if ($wrongClass->isNotEmpty()) {
         return response()->json([
             'success' => false,
-            'message' => 'Some students do not belong to the class of the target section',
+            'message' => 'بعض الطلاب لا ينتمون لصف الشعبة المستهدفة',
             'data' => [
                 'target_class_id' => $targetSection->class_id,
                 'invalid_student_ids' => $wrongClass->pluck('id')->values(),
@@ -206,7 +206,7 @@ public function transfer(Request $request)
     if ($availableSlots < $toTransfer->count()) {
         return response()->json([
             'success' => false,
-            'message' => 'Not enough capacity in target section',
+            'message' => 'لا تتسع الشعبة المستهدفة لهذا العدد',
             'data' => [
                 'available_slots' => $availableSlots,
                 'requested' => $toTransfer->count(),
@@ -231,7 +231,7 @@ public function transfer(Request $request)
 
         return response()->json([
             'success' => true,
-            'message' => 'Students transferred successfully',
+            'message' => 'تم نقل الطلاب بنجاح',
             'data' => $updated,
         ]);
     });

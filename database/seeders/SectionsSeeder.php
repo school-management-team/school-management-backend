@@ -12,20 +12,23 @@ class SectionsSeeder extends Seeder
     {
         $created = 0;
 
+        $existing = 0;
+
         foreach (SchoolClass::all() as $class) {
             foreach (['أ', 'ب'] as $name) {
-                Section::firstOrCreate(
+                $section = Section::firstOrCreate(
                     ['class_id' => $class->id, 'name' => $name],
-
-
                     ['capacity' => 30]
                 );
 
-                $created++;
-
+                if ($section->wasRecentlyCreated) {
+                    $created++;
+                } else {
+                    $existing++;
+                }
             }
         }
 
-        $this->command?->info("شعب: {$created}");
+        $this->command?->info("شعب: أنشأنا {$created}".($existing > 0 ? " ولقينا {$existing} موجودة" : ''));
     }
 }
