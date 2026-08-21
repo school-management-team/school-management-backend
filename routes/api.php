@@ -228,25 +228,21 @@ Route::middleware(['auth:sanctum', 'active', 'role:supervisor'])->prefix('superv
     Route::post('/profile/cv', [SupervisorProfileController::class, 'uploadCv']);
     Route::get('/profile/cv', [SupervisorProfileController::class, 'downloadCv']);
 
-
     Route::get('/schedule/periods', [WeeklyScheduleController::class, 'periods']);
     Route::get('/schedule/free-teachers', [WeeklyScheduleController::class, 'freeTeachers']);
 
-    // بناء جدول الشعبة يوم بيوم — بالمادة والمعلم، والتكليف بينعمل لحالو
     Route::post('/schedule/build/{section}', [WeeklyScheduleController::class, 'buildWeek']);
-
-    // نقطة البداية لبناء جدول شعبة: مواد مرحلتها + معلميها + كم ضلّ
     Route::get('/schedule/builder/{section}', [WeeklyScheduleController::class, 'builder']);
 
-    // وين فيك تحط تكليف معيّن بالجدول — ?teacher_assignment_id=
+
     Route::get('/schedule/free-slots', [WeeklyScheduleController::class, 'freeSlots']);
     Route::get('/schedule/section/{section}', [WeeklyScheduleController::class, 'sectionSchedule']);
 
     Route::get('/schedule/teacher/{teacher}', [WeeklyScheduleController::class, 'teacherSchedule']);
     Route::post('/schedule', [WeeklyScheduleController::class, 'store']);
 
-    // إضافة عدة حصص بطلب واحد — كلها أو ولا وحدة
-    Route::post('/schedule/bulk', [WeeklyScheduleController::class, 'storeBulk']);
+    // إضافة عدةوحدة حصص بطلب واحد — كلها أو ولا
+    //Route::post('/schedule/bulk', [WeeklyScheduleController::class, 'storeBulk']);
 
     Route::put('/schedule/{schedule}', [WeeklyScheduleController::class, 'update']);
     Route::delete('/schedule/{schedule}', [WeeklyScheduleController::class, 'destroy']);
