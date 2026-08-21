@@ -18,22 +18,14 @@ class AttendanceSeeder extends Seeder
 
     public function run(): void
     {
-        $students = Student::whereNotNull('section_id')->get();
-
-        if ($students->isEmpty()) {
-            $this->command?->warn('لا يوجد طلاب موزّعين على شعب. شغّل StudentSectionSeeder أولاً.');
-            return;
-        }
-
         $supervisor = Supervisor::first();
-
 
         if (!$supervisor) {
             $this->command?->warn('لا يوجد موجّه. شغّل SupervisorSeeder أولاً.');
             return;
         }
 
-        Attendance::query()->delete();
+        $students = Student::whereNotNull('section_id')->get();
 
         $calendar = app(SchoolCalendarService::class);
 
@@ -58,6 +50,8 @@ class AttendanceSeeder extends Seeder
 
         $created = 0;
         $counts = [];
+
+        Attendance::query()->delete();
 
         foreach ($students as $student) {
             foreach ($schoolDays as $date) {
@@ -84,8 +78,13 @@ class AttendanceSeeder extends Seeder
             $summary[] = $status.': '.$count;
         }
 
-        $this->command?->info("سجلات حضور الطلاب: {$created} على ".count($schoolDays).' يوم دوام');
-        $this->command?->line('  '.implode(' | ', $summary));
+        if ($students->isEmpty()) {
+            // حضور المعلمين مستقل عن توزيع الطلاب — ما بصير نوقف بسببه
+            $this->command?->warn('لا يوجد طلاب موزّعين على شعب، فتخطّينا حضور الطلاب. شغّل StudentSectionSeeder إذا بدك إياه.');
+        } else {
+            $this->command?->info("سجلات حضور الطلاب: {$created} على ".count($schoolDays).' يوم دوام');
+            $this->command?->line('  '.implode(' | ', $summary));
+        }
 
         $this->seedTeachers($schoolDays, $supervisor->id);
     }

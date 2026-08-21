@@ -5,16 +5,7 @@ namespace App\Http\Controllers;
 use App\Services\AuthService;
 use Illuminate\Http\Request;
 
-/**
- * بروفايل ولي الأمر — بياناته هو فقط.
- *
- * البيانات موزّعة على جدولين:
- *   users     → الاسم، الإيميل، الهاتف، الجنس، تاريخ الميلاد، الصورة
- *   guardians → صلة القرابة (أب/أم)، عدد الأولاد
- *
- * ملاحظة: بيانات أولاده (الشعبة، العلامات، الحضور) إلها نقاط مستقلة
- * تحت /api/guardian/children — مش شغل البروفايل.
- */
+
 class GuardianProfileController extends Controller
 {
     protected $authService;

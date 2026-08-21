@@ -220,26 +220,35 @@ Route::middleware(['auth:sanctum', 'active', 'role:supervisor,admin'])->prefix('
 
 Route::middleware(['auth:sanctum', 'active', 'role:supervisor'])->prefix('supervisor')->group(function () {
 
-    // البروفايل كامل + ملخّص نشاط الموجّه بالنظام
+
     Route::get('/profile', [SupervisorProfileController::class, 'show']);
 
-    // تعديل المعلومات الشخصية والمهنية معاً
     Route::put('/profile', [SupervisorProfileController::class, 'update']);
 
-    // السيرة الذاتية — رفع/استبدال، وتحميل
     Route::post('/profile/cv', [SupervisorProfileController::class, 'uploadCv']);
     Route::get('/profile/cv', [SupervisorProfileController::class, 'downloadCv']);
 
 
-
     Route::get('/schedule/periods', [WeeklyScheduleController::class, 'periods']);
-
     Route::get('/schedule/free-teachers', [WeeklyScheduleController::class, 'freeTeachers']);
+
+    // بناء جدول الشعبة يوم بيوم — بالمادة والمعلم، والتكليف بينعمل لحالو
+    Route::post('/schedule/build/{section}', [WeeklyScheduleController::class, 'buildWeek']);
+
+    // نقطة البداية لبناء جدول شعبة: مواد مرحلتها + معلميها + كم ضلّ
+    Route::get('/schedule/builder/{section}', [WeeklyScheduleController::class, 'builder']);
+
+    // وين فيك تحط تكليف معيّن بالجدول — ?teacher_assignment_id=
+    Route::get('/schedule/free-slots', [WeeklyScheduleController::class, 'freeSlots']);
     Route::get('/schedule/section/{section}', [WeeklyScheduleController::class, 'sectionSchedule']);
 
     Route::get('/schedule/teacher/{teacher}', [WeeklyScheduleController::class, 'teacherSchedule']);
     Route::post('/schedule', [WeeklyScheduleController::class, 'store']);
-    Route::post('/schedule/bulk', [WeeklyScheduleController::class, 'storeBulk']); Route::put('/schedule/{schedule}', [WeeklyScheduleController::class, 'update']);
+
+    // إضافة عدة حصص بطلب واحد — كلها أو ولا وحدة
+    Route::post('/schedule/bulk', [WeeklyScheduleController::class, 'storeBulk']);
+
+    Route::put('/schedule/{schedule}', [WeeklyScheduleController::class, 'update']);
     Route::delete('/schedule/{schedule}', [WeeklyScheduleController::class, 'destroy']);
 
 
@@ -283,17 +292,11 @@ Route::middleware(['auth:sanctum', 'active', 'role:supervisor'])->prefix('superv
 
     Route::get('/substitutions/absent-lessons', [SubstitutionController::class, 'absentLessons']);
 
-    // المرشحين لتغطية حصة، مرتبين: نفس المادة أولاً ثم الأقل عبئاً هالأسبوع
-    // ?weekly_schedule_id= &date=
     Route::get('/substitutions/available-teachers', [SubstitutionController::class, 'availableTeachers']);
+ Route::post('/substitutions', [SubstitutionController::class, 'store']);
 
-    // ?date= &status=assigned|completed|cancelled
     Route::get('/substitutions', [SubstitutionController::class, 'index']);
 
-    // تعيين بديل — بيفحص إنو موجود بالمدرسة وفاضي ومش مكلّف بتعويض تاني
-    Route::post('/substitutions', [SubstitutionController::class, 'store']);
-
-    // تحديث الحالة: تم التنفيذ أو إلغاء (الإلغاء بيحرّر البديل)
     Route::patch('/substitutions/{substitution}/status', [SubstitutionController::class, 'updateStatus']);
 });
 
@@ -301,10 +304,8 @@ Route::middleware(['auth:sanctum', 'active', 'role:supervisor'])->prefix('superv
 
 Route::middleware(['auth:sanctum', 'active', 'role:guardian'])->prefix('guardian')->group(function () {
 
-    // بروفايل ولي الأمر نفسه: معلوماته الشخصية + صلة القرابة وعدد الأولاد
     Route::get('/profile', [GuardianProfileController::class, 'show']);
 
-    // تعديل معلوماته الشخصية وصلة القرابة بنفس الطلب
     Route::put('/profile', [GuardianProfileController::class, 'update']);
 
     Route::get('/children', [GuardianController::class, 'children']);

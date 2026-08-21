@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\LessonSubstitution;
+use App\Models\Stage;
 use App\Models\Teacher;
 use App\Models\TeacherAttendance;
 use App\Models\WeeklySchedule;
@@ -198,28 +199,7 @@ class SubstitutionController extends Controller
         $dateDay = $this->dayOfWeek($date);
 
         if ($lesson->day_of_week !== $dateDay) {
-            // التاريخ مكتوب من المستخدم وما بيوافق يوم الحصة — منقترح البديل
-            $nearest = $this->calendarService->nearestDatesFor($lesson->day_of_week, $date);
-            $lessonDayLabel = $this->calendarService->dayLabel($lesson->day_of_week);
-            $dateDayLabel = $this->calendarService->dayLabel($dateDay);
-
-            return response()->json([
-                'success' => false,
-                'message' => "هذه الحصة تُعطى يوم {$lessonDayLabel}، و{$date} يوم {$dateDayLabel} — "
-                    ."ما في حصة هذا اليوم. جرّب {$nearest['next']}",
-                'data' => [
-                    'lesson_day' => $lesson->day_of_week,
-                    'lesson_day_label' => $lessonDayLabel,
-                    'date_day' => $dateDay,
-                    'date_day_label' => $dateDayLabel,
-                    'date' => $date,
-                    // تواريخ جاهزة للاستعمال مباشرة
-                    'suggested_dates' => [
-                        'next' => $nearest['next'],
-                        'previous' => $nearest['previous'],
-                    ],
-                ],
-            ], 422);
+            return $this->dayMismatchResponse($lesson, $date);
         }
 
         // مادة الحصة نفسها، وإذا ما في تكليف مربوط منرجع لمادة المعلم الغائب
@@ -231,7 +211,33 @@ class SubstitutionController extends Controller
             $targetSubjectId = $lesson->teacher->subject_id;
         }
 
-        $targetStageId = $lesson->teacher ? $lesson->teacher->stage_id : null;
+        /*
+         | المرحلة المرجعية هي مرحلة الصف يلي بتنعطى فيه الحصة — مش مرحلة
+         | المعلم الغايب. لأن المطلوب حدا يقدر يعلّم لهالطلاب، وطلاب الصف
+         | الأول ما بينفع يجيهم أستاذ ثانوي حتى لو كان فاضي.
+         */
+        $targetStageId = null;
+
+        if ($lesson->teacherAssignment
+            && $lesson->teacherAssignment->section
+            && $lesson->teacherAssignment->section->schoolClass) {
+            $targetStageId = $lesson->teacherAssignment->section->schoolClass->stage_id;
+        }
+
+        if ($targetStageId === null && $lesson->teacher) {
+            $targetStageId = $lesson->teacher->stage_id;
+        }
+
+        $targetStage = $targetStageId ? Stage::find($targetStageId) : null;
+
+        /*
+         | مواد هالمرحلة. ما بيكفي المعلم يكون بنفس المرحلة — لازم مادته
+         | تكون مدرَّسة فيها. عنا بالداتا أستاذ تاريخ مسجّل بالابتدائي،
+         | والابتدائي ما فيه تاريخ، فما بينفع يعوّض حصة ابتدائي.
+         */
+        $stageSubjectIds = $targetStage
+            ? $targetStage->subjects()->pluck('subjects.id')->all()
+            : [];
 
         $day = $lesson->day_of_week;
         $period = $lesson->period_number;
@@ -268,19 +274,21 @@ class SubstitutionController extends Controller
 
         $candidates = [];
 
+        // ليش استبعدنا معلمين فاضيين — منعدّهم حتى نشرحها بالرد
+        $excludedOtherStage = 0;
+        $excludedSubjectNotInStage = 0;
+
         foreach ($teachers as $teacher) {
-            $sameSubject = $targetSubjectId !== null && $teacher->subject_id === $targetSubjectId;
-            $sameStage = $targetStageId !== null && $teacher->stage_id === $targetStageId;
-
-            // نفس المادة بتساوي نقطتين، ونفس المرحلة نقطة
-            $score = 0;
-
-            if ($sameSubject) {
-                $score += 2;
+            // شرط 4: نفس المرحلة حصراً
+            if ($targetStageId !== null && $teacher->stage_id !== $targetStageId) {
+                $excludedOtherStage++;
+                continue;
             }
 
-            if ($sameStage) {
-                $score += 1;
+            // شرط 5: مادته مدرَّسة بهالمرحلة
+            if (count($stageSubjectIds) > 0 && !in_array($teacher->subject_id, $stageSubjectIds)) {
+                $excludedSubjectNotInStage++;
+                continue;
             }
 
             $candidates[] = [
@@ -289,17 +297,19 @@ class SubstitutionController extends Controller
                 'subject_id' => $teacher->subject_id,
                 'subject' => $teacher->subject ? $teacher->subject->name : null,
                 'stage' => $teacher->stage ? $teacher->stage->name : null,
-                'same_subject' => $sameSubject,
-                'same_stage' => $sameStage,
+                'same_subject' => $targetSubjectId !== null && $teacher->subject_id === $targetSubjectId,
                 'substitutions_this_week' => $teacher->substitutions_this_week,
-                'match_score' => $score,
             ];
         }
 
-        // الأنسب أولاً، وعند التساوي الأقل عبئاً، وبعدها ترتيب أبجدي
+        /*
+         | الترتيب: نفس المادة أولاً، وبعدين باقي معلمي المرحلة.
+         | وعند التساوي: الأقل تعويضات هالأسبوع، وبعدها ترتيب أبجدي.
+         | المرحلة ما عادت جزء من الترتيب لأنها صارت شرط دخول.
+         */
         usort($candidates, function ($a, $b) {
-            if ($a['match_score'] !== $b['match_score']) {
-                return $b['match_score'] - $a['match_score'];
+            if ($a['same_subject'] !== $b['same_subject']) {
+                return $a['same_subject'] ? -1 : 1;
             }
 
             if ($a['substitutions_this_week'] !== $b['substitutions_this_week']) {
@@ -308,6 +318,8 @@ class SubstitutionController extends Controller
 
             return strcmp($a['teacher_name'], $b['teacher_name']);
         });
+
+        $stageName = $targetStage ? $targetStage->name : 'غير محددة';
 
         $sameSubjectCount = 0;
 
@@ -332,14 +344,24 @@ class SubstitutionController extends Controller
             $candidates = $filtered;
         }
 
+        $excludedTotal = $excludedOtherStage + $excludedSubjectNotInStage;
+
         if (count($candidates) === 0) {
             if ($sameSubjectOnly && $allAvailable > 0) {
                 $message = "لا يوجد معلم متاح لنفس المادة. يوجد {$allAvailable} معلم متاح من مواد أخرى — أعد الطلب بدون same_subject لعرضهم";
+            } elseif ($excludedTotal > 0) {
+                // في معلمين فاضيين، بس ولا واحد بيصلح لهالمرحلة — منقول ليش
+                $message = "لا يوجد معلم متاح من مرحلة {$stageName}. "
+                    ."يوجد {$excludedTotal} معلم فاضي لكنه من مرحلة أخرى أو مادته غير مدرَّسة في هذه المرحلة";
             } else {
                 $message = $this->noCandidatesReason($date, $lesson);
             }
         } else {
             $message = 'عدد المعلمين المتاحين: '.count($candidates);
+
+            if ($excludedTotal > 0) {
+                $message .= " (واستُبعد {$excludedTotal} معلم فاضي خارج مرحلة {$stageName})";
+            }
         }
 
         return response()->json([
@@ -356,6 +378,7 @@ class SubstitutionController extends Controller
                     'subject' => $lesson->subject_name,
                     'class_name' => $lesson->class_name,
                     'section_name' => $lesson->section_name,
+                    'stage' => $stageName,
                     'absent_teacher_id' => $lesson->teacher_id,
                     // اسم صاحب الحصة الغايب — مش مرشّح، بس للتوضيح
                     'absent_teacher_name' => $lesson->teacher && $lesson->teacher->user
@@ -366,6 +389,13 @@ class SubstitutionController extends Controller
                 'total_available' => count($candidates),
                 'same_subject_count' => $sameSubjectCount,
                 'filtered_by_same_subject' => $sameSubjectOnly,
+                // المرحلة شرط دخول، فمنعلن عنها ومنعلن مين استُبعد بسببها
+                'stage_id' => $targetStageId,
+                'stage' => $stageName,
+                'excluded' => [
+                    'other_stage' => $excludedOtherStage,
+                    'subject_not_in_stage' => $excludedSubjectNotInStage,
+                ],
             ],
         ]);
     }
@@ -416,10 +446,7 @@ class SubstitutionController extends Controller
         }
 
         if ($lesson->day_of_week !== $this->dayOfWeek($date)) {
-            return response()->json([
-                'success' => false,
-                'message' => 'التاريخ المحدد لا يوافق يوم هذه الحصة في الجدول',
-            ], 422);
+            return $this->dayMismatchResponse($lesson, $date);
         }
 
         if ($lesson->teacher_id === (int) $substituteId) {
@@ -438,6 +465,19 @@ class SubstitutionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'المعلم صاحب الحصة غير مسجّل كغائب في هذا التاريخ',
+            ], 422);
+        }
+
+        /*
+         | البديل لازم يكون من مرحلة الصف نفسه ومادته مدرَّسة فيها.
+         | القائمة بتفلتر، بس ما منعتمد عليها — ممكن ينبعت الطلب رأساً.
+         */
+        $stageError = $this->stageMismatchError($lesson, $substituteId);
+
+        if ($stageError) {
+            return response()->json([
+                'success' => false,
+                'message' => $stageError,
             ], 422);
         }
 
@@ -622,6 +662,95 @@ class SubstitutionController extends Controller
     }
 
     /** تحويل التاريخ ليوم مدرسي، أو null إذا كان جمعة/سبت */
+    /**
+     * سبب رفض البديل بسبب المرحلة، أو null إذا كان مؤهّلاً.
+     *
+     * قاعدة المشروع: المعلم بيعلّم بمرحلته حصراً. وكمان لازم مادته تكون
+     * من مواد هالمرحلة — ما بينفع أستاذ تاريخ يعوّض بالابتدائي لأن
+     * الابتدائي ما فيه تاريخ.
+     */
+    private function stageMismatchError(WeeklySchedule $lesson, $substituteId): ?string
+    {
+        $substitute = Teacher::with('stage', 'subject')->find($substituteId);
+
+        if (!$substitute) {
+            return null;
+        }
+
+        $stageId = null;
+
+        if ($lesson->teacherAssignment
+            && $lesson->teacherAssignment->section
+            && $lesson->teacherAssignment->section->schoolClass) {
+            $stageId = $lesson->teacherAssignment->section->schoolClass->stage_id;
+        }
+
+        if ($stageId === null && $lesson->teacher) {
+            $stageId = $lesson->teacher->stage_id;
+        }
+
+        if ($stageId === null) {
+            return null;
+        }
+
+        $stage = Stage::find($stageId);
+        $stageName = $stage ? $stage->name : $stageId;
+
+        if ($substitute->stage_id !== $stageId) {
+            $substituteStage = $substitute->stage ? $substitute->stage->name : 'غير محددة';
+
+            return "المعلم البديل من مرحلة {$substituteStage}، وهذه الحصة لمرحلة {$stageName}";
+        }
+
+        if ($stage) {
+            $stageSubjectIds = $stage->subjects()->pluck('subjects.id')->all();
+
+            if (count($stageSubjectIds) > 0 && !in_array($substitute->subject_id, $stageSubjectIds)) {
+                $subjectName = $substitute->subject ? $substitute->subject->name : 'مادته';
+
+                return "مادة المعلم البديل ({$subjectName}) غير مدرَّسة في مرحلة {$stageName}";
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * رد موحّد لما التاريخ ما بيوافق يوم الحصة.
+     *
+     * الحصة إلها يوم ثابت بالأسبوع، والتاريخ بيحدد أي أسبوع. أكتر غلط
+     * بيصير: المستخدم بياخد رقم حصة من طلب قديم وبيلزقه بتاريخ تاني —
+     * فمنقلّه اليوم الصح، ومنقترح التاريخ، ومنوجّهه لمصدر الأرقام الصحيح.
+     */
+    private function dayMismatchResponse(WeeklySchedule $lesson, string $date)
+    {
+        $dateDay = $this->dayOfWeek($date);
+        $nearest = $this->calendarService->nearestDatesFor($lesson->day_of_week, $date);
+        $lessonDayLabel = $this->calendarService->dayLabel($lesson->day_of_week);
+        $dateDayLabel = $this->calendarService->dayLabel($dateDay);
+
+        return response()->json([
+            'success' => false,
+            'message' => "الحصة رقم {$lesson->id} تُعطى يوم {$lessonDayLabel}، و{$date} يوم {$dateDayLabel} — "
+                ."ما في حصة هذا اليوم. جرّب {$nearest['next']}، أو خذ أرقام حصص هذا التاريخ من "
+                .'/supervisor/substitutions/absent-lessons',
+            'data' => [
+                'weekly_schedule_id' => $lesson->id,
+                'lesson_day' => $lesson->day_of_week,
+                'lesson_day_label' => $lessonDayLabel,
+                'date_day' => $dateDay,
+                'date_day_label' => $dateDayLabel,
+                'date' => $date,
+                // تواريخ جاهزة للاستعمال مباشرة
+                'suggested_dates' => [
+                    'next' => $nearest['next'],
+                    'previous' => $nearest['previous'],
+                ],
+                'lessons_source' => '/supervisor/substitutions/absent-lessons?date='.$date,
+            ],
+        ], 422);
+    }
+
     /** أقرب تاريخ بتنعطى فيه حصة هذا اليوم — واليوم نفسه بينحسب إذا وافق */
     private function nextOccurrenceOf(string $day): string
     {
