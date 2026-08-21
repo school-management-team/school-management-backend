@@ -120,7 +120,7 @@ class TeacherAssignmentController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Teacher assignment updated successfully',
+            'message' => 'تم تحديث التكليف بنجاح',
             'data' => $teacherAssignment->load(['teacher.user', 'subject', 'section.schoolClass']),
         ]);
     }

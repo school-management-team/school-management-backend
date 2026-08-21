@@ -595,17 +595,10 @@ public function resendVerificationCode(Request $request)
             'message' => 'المستخدم غير موجود'
         ], 404);
     }
-    if($user->status !=='unverified') {
-
-    return response()->json([
-        'success'=>false,
-        'message' => 'لا يمكن ارسال الرمز لهذا الحساب']);
-    }
-
-    if ($user->isVerified()) {
+    if ($user->status !== 'unverified') {
         return response()->json([
             'success' => false,
-            'message' => 'الحساب مفعل مسبقاً'
+            'message' => 'لا يمكن ارسال الرمز لهذا الحساب، الحساب مفعّل مسبقاً',
         ], 400);
     }
 
@@ -682,7 +675,10 @@ private function sendEmailCode(User $user, string $code): void
 public function stages()
 {
 
-    return response()->json(['success' => true, 'data' => Stage::all(['id','name'])]);
+    return response()->json([
+        'success' => true,
+        'data' => Stage::orderBy('id')->get(['id', 'name']),
+    ]);
 }
 
 public function subjects(int $stageId)

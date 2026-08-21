@@ -42,7 +42,7 @@ class ClassController extends Controller
         if ($exists) {
             return response()->json([
                 'success' => false,
-                'message' => 'A class with the same order already exists in this stage',
+                'message' => 'يوجد صف بنفس الترتيب في هذه المرحلة',
             ], 422);
         }
 
@@ -54,7 +54,7 @@ class ClassController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Class created successfully',
+            'message' => 'تم إنشاء الصف بنجاح',
             'data' => $class->load('stage:id,name'),
         ], 201);
     }
@@ -88,11 +88,12 @@ public function update(Request $request, SchoolClass $schoolClass)
     if ($exists) {
         return response()->json([
             'success' => false,
-            'message' => 'Another class with the same order already exists in this stage',
+            'message' => 'يوجد صف آخر بنفس الترتيب في هذه المرحلة',
         ], 422);
     }
 
-    // fill مش update — حتى نقدر نفحص إذا في تغيير فعلي قبل الحفظ
+    // fill مش update — حتى نقدر نفحص إذا في تغيير فعلي قبل الحفظ.
+    // validated() مش only() — بتاخد بس الحقول يلي مرقت الفاليديشن فعلاً
     $schoolClass->fill($validator->validated());
 
     if (!$schoolClass->isDirty()) {

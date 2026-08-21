@@ -7,6 +7,7 @@ use App\Models\Student;
 use App\Models\Teacher;
 use App\Models\TeacherAssignment;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\DB;
 
 class TeacherAssignmentsSeeder extends Seeder
 {
@@ -31,6 +32,12 @@ class TeacherAssignmentsSeeder extends Seeder
         $created = 0;
         $skipped = [];
 
+        $taught = [];
+
+        foreach (DB::table('stage_subject')->get() as $row) {
+            $taught[$row->stage_id.'-'.$row->subject_id] = true;
+        }
+
         foreach ($sections as $section) {
             $classStageId = $section->schoolClass ? $section->schoolClass->stage_id : null;
 
@@ -49,19 +56,24 @@ class TeacherAssignmentsSeeder extends Seeder
                  | والمادة لازم تكون مقررة بهالمرحلة (جدول stage_subject).
                  | بدون هالفحص بينخلق تكليف زي "التاريخ لصف ابتدائي" —
                  | والتاريخ مقرر بالأدبي بس.
+                 |
+                 | منفحص من $taught المحمّلة فوق بدل استعلام لكل معلم بكل
+                 | شعبة — هون جوّا لوبين متداخلين، فالفرق مئات الاستعلامات.
                  */
-                if ($classStageId && !$teacher->subject->stages()->where('stages.id', $classStageId)->exists()) {
+                if ($classStageId && !isset($taught[$classStageId.'-'.$teacher->subject_id])) {
                     $skipped[$teacher->id] = $teacher;
                     continue;
                 }
 
-                TeacherAssignment::firstOrCreate([
+                $assignment = TeacherAssignment::firstOrCreate([
                     'teacher_id' => $teacher->id,
                     'subject_id' => $teacher->subject_id,
                     'section_id' => $section->id,
                 ]);
 
-                $created++;
+                if ($assignment->wasRecentlyCreated) {
+                    $created++;
+                }
             }
         }
 
@@ -74,7 +86,19 @@ class TeacherAssignmentsSeeder extends Seeder
                 $name = $teacher->user ? $teacher->user->user_name : 'معلم #'.$teacher->id;
                 $stage = $teacher->stage ? $teacher->stage->name : '-';
                 $subject = $teacher->subject ? $teacher->subject->name : '-';
-                $this->command?->warn("  {$name} بلا تكاليف — لا يوجد صف فيه طلاب تُدرَّس فيه {$subject} لمرحلة {$stage}");
+
+                /*
+                 | سببين مختلفين تماماً وكانوا برسالة وحدة. التمييز بينهن
+                 | بيوفّر وقت: مشكلة بتوزيع الطلاب، ولا مشكلة بـ stage_subject؟
+                 */
+                $subjectTaught = $teacher->subject_id
+                    && isset($taught[$teacher->stage_id.'-'.$teacher->subject_id]);
+
+                $reason = $subjectTaught
+                    ? "لا يوجد صف فيه طلاب بمرحلة {$stage}"
+                    : "مادة {$subject} غير مقررة في مرحلة {$stage}";
+
+                $this->command?->warn("  {$name} بلا تكاليف — {$reason}");
             }
         }
     }

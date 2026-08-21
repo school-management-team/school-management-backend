@@ -16,8 +16,12 @@ class GradeFactory extends Factory
         $type = fake()->randomElement(array_keys(config('school.grade_components')));
         $assignment = TeacherAssignment::inRandomOrder()->first();
 
+        $student = $assignment
+            ? Student::where('section_id', $assignment->section_id)->inRandomOrder()->first()
+            : Student::inRandomOrder()->first();
+
         return [
-            'student_id' => Student::inRandomOrder()->first()?->id,
+            'student_id' => $student?->id,
             'teacher_assignment_id' => $assignment?->id,
             'subject_id' => $assignment?->subject_id,
             'section_id' => $assignment?->section_id,

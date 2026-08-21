@@ -21,7 +21,7 @@ class DatabaseSeeder extends Seeder
             GuardianSeeder::class,
             AssignmentsSeeder::class,
             StudentAssignmentStatusesSeeder::class,
-            //StudentFeeSeeder::class,
+            StudentFeeSeeder::class,
             WeeklyScheduleSeeder::class,
             GradesSeeder::class,
 

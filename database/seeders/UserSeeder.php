@@ -44,7 +44,6 @@ class UserSeeder extends Seeder
             ['arabic2@test.com', 'أستاذ اللغة العربية الثاني', '0930000007', 'اللغة العربية', 'primary'],
             ['english@test.com', 'أستاذ اللغة الإنجليزية', '0930000004', 'اللغة الإنجليزية', 'primary'],
             ['bio.primary@test.com', 'أستاذ الأحياء - ابتدائي', '0930000008', 'أحياء', 'primary'],
-            ['cs.primary@test.com', 'أستاذ الحاسوب - ابتدائي', '0930000009', 'الحاسوب', 'primary'],
 
             // إعدادي
             ['math.middle@test.com', 'أستاذ الرياضيات - إعدادي', '0930000010', 'رياضيات', 'middle'],

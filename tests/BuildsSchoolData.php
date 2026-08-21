@@ -106,6 +106,14 @@ trait BuildsSchoolData
         return $subject;
     }
 
+    /** ربط صريح لمادة بمرحلة — للاختبارات يلي بدها تتحكّم بالربط بنفسها */
+    protected function linkSubjectToStage(Subject $subject, Stage $stage): Subject
+    {
+        $subject->stages()->syncWithoutDetaching([$stage->id]);
+
+        return $subject;
+    }
+
     protected function makeAssignment(Teacher $teacher, Subject $subject, Section $section): TeacherAssignment
     {
         return TeacherAssignment::create([

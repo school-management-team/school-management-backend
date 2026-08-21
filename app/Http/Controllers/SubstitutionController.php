@@ -482,44 +482,10 @@ class SubstitutionController extends Controller
         }
 
         return DB::transaction(function () use ($lesson, $substituteId, $date, $supervisorId, $validated) {
-            // البديل موجود بالمدرسة
-            $atSchool = TeacherAttendance::forDate($date)->atSchool()
-                ->where('teacher_id', $substituteId)
-                ->exists();
+            $conflict = $this->substituteConflict($substituteId, $lesson, $date);
 
-            if (!$atSchool) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'المعلم البديل غير مسجّل كموجود في المدرسة بهذا التاريخ',
-                ], 422);
-            }
-
-            // البديل ما عندو حصة بنفس التوقيت
-            $hasOwnLesson = WeeklySchedule::where('teacher_id', $substituteId)
-                ->where('day_of_week', $lesson->day_of_week)
-                ->where('period_number', $lesson->period_number)
-                ->where('type', 'class')
-                ->exists();
-
-            if ($hasOwnLesson) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'المعلم البديل لديه حصة في نفس التوقيت',
-                ], 422);
-            }
-
-            // البديل ما مكلّف بتعويض تاني بنفس التوقيت
-            $hasOtherSubstitution = LessonSubstitution::forDate($date)->active()
-                ->where('substitute_teacher_id', $substituteId)
-                ->where('period_number', $lesson->period_number)
-                ->where('weekly_schedule_id', '!=', $lesson->id)
-                ->exists();
-
-            if ($hasOtherSubstitution) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'المعلم البديل مكلّف بتعويض آخر في نفس التوقيت',
-                ], 422);
+            if ($conflict) {
+                return $conflict;
             }
 
             $substitution = LessonSubstitution::updateOrCreate(
@@ -618,7 +584,50 @@ class SubstitutionController extends Controller
             'note' => 'nullable|string|max:255',
         ]);
 
-        $substitution->update($validated);
+        $reactivating = $validated['status'] !== 'cancelled'
+            && $substitution->status === 'cancelled';
+
+        if ($reactivating) {
+            $lesson = $substitution->weeklySchedule;
+
+            if (!$lesson) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'الحصة المرتبطة بهذا التعويض لم تعد موجودة',
+                ], 422);
+            }
+
+            $date = $substitution->date->toDateString();
+
+            $stillAway = TeacherAttendance::forDate($date)->away()
+                ->where('teacher_id', $substitution->absent_teacher_id)
+                ->exists();
+
+            if (!$stillAway) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'المعلم صاحب الحصة لم يعد مسجّلاً كغائب في هذا التاريخ',
+                ], 422);
+            }
+
+            $conflict = DB::transaction(function () use ($substitution, $lesson, $date, $validated) {
+                $blocked = $this->substituteConflict($substitution->substitute_teacher_id, $lesson, $date);
+
+                if ($blocked) {
+                    return $blocked;
+                }
+
+                $substitution->update($validated);
+
+                return null;
+            });
+
+            if ($conflict) {
+                return $conflict;
+            }
+        } else {
+            $substitution->update($validated);
+        }
 
         return response()->json([
             'success' => true,
@@ -628,6 +637,49 @@ class SubstitutionController extends Controller
                 'substituteTeacher.user:id,user_name',
             ]),
         ]);
+    }
+
+    private function substituteConflict(int $substituteId, WeeklySchedule $lesson, string $date)
+    {
+        $atSchool = TeacherAttendance::forDate($date)->atSchool()
+            ->where('teacher_id', $substituteId)
+            ->exists();
+
+        if (!$atSchool) {
+            return response()->json([
+                'success' => false,
+                'message' => 'المعلم البديل غير مسجّل كموجود في المدرسة بهذا التاريخ',
+            ], 422);
+        }
+
+        $hasOwnLesson = WeeklySchedule::where('teacher_id', $substituteId)
+            ->where('day_of_week', $lesson->day_of_week)
+            ->where('period_number', $lesson->period_number)
+            ->where('type', 'class')
+            ->exists();
+
+        if ($hasOwnLesson) {
+            return response()->json([
+                'success' => false,
+                'message' => 'المعلم البديل لديه حصة في نفس التوقيت',
+            ], 422);
+        }
+
+        $hasOtherSubstitution = LessonSubstitution::forDate($date)->active()
+            ->where('substitute_teacher_id', $substituteId)
+            ->where('period_number', $lesson->period_number)
+            ->where('weekly_schedule_id', '!=', $lesson->id)
+            ->lockForUpdate()
+            ->exists();
+
+        if ($hasOtherSubstitution) {
+            return response()->json([
+                'success' => false,
+                'message' => 'المعلم البديل مكلّف بتعويض آخر في نفس التوقيت',
+            ], 422);
+        }
+
+        return null;
     }
 
     /**

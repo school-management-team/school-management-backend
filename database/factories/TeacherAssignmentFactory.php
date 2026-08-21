@@ -15,8 +15,19 @@ class TeacherAssignmentFactory extends Factory
     public function definition(): array
     {
         $teacher = Teacher::inRandomOrder()->first();
-        $subject = Subject::inRandomOrder()->first();
-        $section = Section::inRandomOrder()->first();
+        $section = null;
+
+        if ($teacher) {
+            $section = Section::whereHas(
+                'schoolClass',
+                fn ($query) => $query->where('stage_id', $teacher->stage_id)
+            )->inRandomOrder()->first();
+        }
+
+        $section = $section ?: Section::inRandomOrder()->first();
+        $subject = $teacher && $teacher->subject_id
+            ? Subject::find($teacher->subject_id)
+            : Subject::inRandomOrder()->first();
 
         return [
             'teacher_id' => $teacher ? $teacher->id : 1,

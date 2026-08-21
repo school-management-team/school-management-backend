@@ -42,7 +42,10 @@ class GradesSeeder extends Seeder
                 continue;
             }
 
+
             $partial = $index % 4 === 0;
+            $status = $index % 3 === 0 ? 'submitted' : 'approved';
+            $index++;
 
             foreach ($students as $student) {
                 foreach (['participation' => [50, 100], 'quiz' => [40, 100], 'exam' => [35, 100]] as $type => $range) {
@@ -82,7 +85,7 @@ class GradesSeeder extends Seeder
                 ],
                 [
                     'teacher_assignment_id' => $assignment->id,
-                    'status' => $index % 3 === 0 ? 'submitted' : 'approved',
+                    'status' => $status,
                 ]
             );
 
