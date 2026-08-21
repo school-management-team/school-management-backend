@@ -2,6 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
+
 abstract class Controller
 {
     /**
@@ -32,5 +35,42 @@ abstract class Controller
             'changed' => false,
             'data' => $data,
         ]);
+    }
+
+    /**
+     * تأكيد بإعادة الطلب.
+     *
+     * أول طلب حذف بيرجّع تحذير (409) وبيسجّل إنو المستخدم شاف التحذير.
+     * لو أعاد نفس الطلب خلال المهلة، بينفّذ الحذف مباشرة.
+     *
+     * أوضح من باراميتر force: المستخدم بيقرأ التحذير وبيضغط "حذف" مرة تانية،
+     * بدون ما يعدّل الرابط.
+     *
+     * المفتاح فيه رقم المستخدم، فتأكيد موجّه ما بيخدم موجّه تاني.
+     */
+    protected function awaitingConfirmation(Request $request, string $action, $id): bool
+    {
+        $key = $this->confirmationKey($request, $action, $id);
+
+        if (Cache::pull($key) !== null) {
+            return false;   // شاف التحذير وأعاد الطلب — ننفّذ
+        }
+
+        Cache::put($key, true, now()->addMinutes(5));
+
+        return true;        // أول مرة — نعرض التحذير
+    }
+
+    /** إلغاء تأكيد معلّق (بعد تنفيذ العملية أو إلغائها) */
+    protected function clearConfirmation(Request $request, string $action, $id): void
+    {
+        Cache::forget($this->confirmationKey($request, $action, $id));
+    }
+
+    private function confirmationKey(Request $request, string $action, $id): string
+    {
+        $userId = $request->user() ? $request->user()->id : 'guest';
+
+        return "confirm:{$action}:{$userId}:{$id}";
     }
 }

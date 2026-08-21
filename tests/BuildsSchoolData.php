@@ -83,23 +83,30 @@ trait BuildsSchoolData
         return Section::create(['name' => $name, 'class_id' => $class->id, 'capacity' => 30]);
     }
 
-    /** اسم المرحلة enum بالداتابيز، فمحصور بهالقيم */
+    /**
+     * اسم المرحلة enum بالداتابيز، فمحصور بهالقيم.
+     *
+     * منربطها بكل المواد الموجودة، لأن النظام بيمنع تكليف معلم بمادة
+     * غير مقررة بمرحلة الشعبة (جدول stage_subject).
+     */
     protected function makeStage(string $name = 'primary'): Stage
     {
-        return Stage::firstOrCreate(['name' => $name]);
+        $stage = Stage::firstOrCreate(['name' => $name]);
+        $stage->subjects()->syncWithoutDetaching(Subject::pluck('id'));
+
+        return $stage;
     }
 
-    protected function makeSubject(string $name, ...$stages): Subject
+    /** المادة بتنربط بكل المراحل الموجودة — شوف makeStage للسبب */
+    protected function makeSubject(string $name): Subject
     {
         $subject = Subject::create(['name' => $name, 'passing_grade' => 50, 'description' => $name]);
-
-        foreach ($stages as $stage) {
-            $this->linkSubjectToStage($subject, $stage);
-        }
+        $subject->stages()->syncWithoutDetaching(Stage::pluck('id'));
 
         return $subject;
     }
 
+    /** ربط صريح لمادة بمرحلة — للاختبارات يلي بدها تتحكّم بالربط بنفسها */
     protected function linkSubjectToStage(Subject $subject, Stage $stage): Subject
     {
         $subject->stages()->syncWithoutDetaching([$stage->id]);

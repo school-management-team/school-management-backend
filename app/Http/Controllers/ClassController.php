@@ -92,7 +92,9 @@ public function update(Request $request, SchoolClass $schoolClass)
         ], 422);
     }
 
-    $schoolClass->fill($request->only(['name', 'grade_order', 'stage_id']));
+    // fill مش update — حتى نقدر نفحص إذا في تغيير فعلي قبل الحفظ.
+    // validated() مش only() — بتاخد بس الحقول يلي مرقت الفاليديشن فعلاً
+    $schoolClass->fill($validator->validated());
 
     if (!$schoolClass->isDirty()) {
         return $this->noChangesMade($schoolClass->load('stage:id,name'));

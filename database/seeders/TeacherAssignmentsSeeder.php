@@ -52,6 +52,14 @@ class TeacherAssignmentsSeeder extends Seeder
                     continue;
                 }
 
+                /*
+                 | والمادة لازم تكون مقررة بهالمرحلة (جدول stage_subject).
+                 | بدون هالفحص بينخلق تكليف زي "التاريخ لصف ابتدائي" —
+                 | والتاريخ مقرر بالأدبي بس.
+                 |
+                 | منفحص من $taught المحمّلة فوق بدل استعلام لكل معلم بكل
+                 | شعبة — هون جوّا لوبين متداخلين، فالفرق مئات الاستعلامات.
+                 */
                 if ($classStageId && !isset($taught[$classStageId.'-'.$teacher->subject_id])) {
                     $skipped[$teacher->id] = $teacher;
                     continue;
@@ -77,15 +85,20 @@ class TeacherAssignmentsSeeder extends Seeder
             if (!$hasAny) {
                 $name = $teacher->user ? $teacher->user->user_name : 'معلم #'.$teacher->id;
                 $stage = $teacher->stage ? $teacher->stage->name : '-';
+                $subject = $teacher->subject ? $teacher->subject->name : '-';
 
+                /*
+                 | سببين مختلفين تماماً وكانوا برسالة وحدة. التمييز بينهن
+                 | بيوفّر وقت: مشكلة بتوزيع الطلاب، ولا مشكلة بـ stage_subject؟
+                 */
                 $subjectTaught = $teacher->subject_id
                     && isset($taught[$teacher->stage_id.'-'.$teacher->subject_id]);
 
                 $reason = $subjectTaught
-                    ? 'ما في طلاب بمرحلته'
-                    : 'مادته ('.($teacher->subject ? $teacher->subject->name : '-').') مش مقررة بمرحلته';
+                    ? "لا يوجد صف فيه طلاب بمرحلة {$stage}"
+                    : "مادة {$subject} غير مقررة في مرحلة {$stage}";
 
-                $this->command?->warn("  {$name} ({$stage}) بلا تكاليف — {$reason}");
+                $this->command?->warn("  {$name} بلا تكاليف — {$reason}");
             }
         }
     }

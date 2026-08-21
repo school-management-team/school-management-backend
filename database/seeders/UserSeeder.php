@@ -28,12 +28,41 @@ class UserSeeder extends Seeder
     private function seedTeachers(): void
     {
 
+        /*
+         | المعلم بيعلّم بمرحلته حصراً، ولازم مادته تكون من مواد هالمرحلة.
+         | فلكل مرحلة كادر من موادها هي — ومنحط أكتر من معلم لنفس المادة
+         | حتى إذا غاب واحد يكون في بديل من نفس الاختصاص.
+         |
+         | (أستاذ التاريخ كان مسجّل بالابتدائي، والابتدائي ما فيه تاريخ —
+         |  محلّه الأدبي.)
+         */
         $teachers = [
+            // ابتدائي
             ['math@test.com', 'أستاذ الرياضيات', '0930000001', 'رياضيات', 'primary'],
-            ['physics@test.com', 'أستاذ الفيزياء', '0930000002', 'فيزياء', 'high_scientific'],
+            ['math2@test.com', 'أستاذ الرياضيات الثاني', '0930000006', 'رياضيات', 'primary'],
             ['arabic@test.com', 'أستاذ اللغة العربية', '0930000003', 'اللغة العربية', 'primary'],
+            ['arabic2@test.com', 'أستاذ اللغة العربية الثاني', '0930000007', 'اللغة العربية', 'primary'],
             ['english@test.com', 'أستاذ اللغة الإنجليزية', '0930000004', 'اللغة الإنجليزية', 'primary'],
-            ['biology@test.com', 'أستاذ الأحياء', '0930000005', 'أحياء', 'primary'],
+            ['bio.primary@test.com', 'أستاذ الأحياء - ابتدائي', '0930000008', 'أحياء', 'primary'],
+
+            // إعدادي
+            ['math.middle@test.com', 'أستاذ الرياضيات - إعدادي', '0930000010', 'رياضيات', 'middle'],
+            ['math.middle2@test.com', 'أستاذ الرياضيات الثاني - إعدادي', '0930000011', 'رياضيات', 'middle'],
+            ['arabic.middle@test.com', 'أستاذ اللغة العربية - إعدادي', '0930000012', 'اللغة العربية', 'middle'],
+            ['english.middle@test.com', 'أستاذ اللغة الإنجليزية - إعدادي', '0930000013', 'اللغة الإنجليزية', 'middle'],
+
+            // ثانوي علمي
+            ['physics@test.com', 'أستاذ الفيزياء', '0930000002', 'فيزياء', 'high_scientific'],
+            ['physics2@test.com', 'أستاذ الفيزياء الثاني', '0930000014', 'فيزياء', 'high_scientific'],
+            ['math.sci@test.com', 'أستاذ الرياضيات - علمي', '0930000015', 'رياضيات', 'high_scientific'],
+            ['chem.sci@test.com', 'أستاذ الكيمياء - علمي', '0930000016', 'كيمياء', 'high_scientific'],
+            ['arabic.sci@test.com', 'أستاذ اللغة العربية - علمي', '0930000017', 'اللغة العربية', 'high_scientific'],
+
+            // ثانوي أدبي
+            ['history@test.com', 'أستاذ التاريخ', '0930000005', 'التاريخ', 'high_literary'],
+            ['history2@test.com', 'أستاذ التاريخ الثاني', '0930000018', 'التاريخ', 'high_literary'],
+            ['geo.lit@test.com', 'أستاذ الجغرافيا - أدبي', '0930000019', 'الجغرافيا', 'high_literary'],
+            ['arabic.lit@test.com', 'أستاذ اللغة العربية - أدبي', '0930000020', 'اللغة العربية', 'high_literary'],
         ];
 
         foreach ($teachers as $row) {
@@ -90,8 +119,8 @@ class UserSeeder extends Seeder
                     'enrollment_date' => now()->toDateString(),
 
                     'class_id' => $class->id,
-                    'section_id' => null,
-
+                    // ما منمرّر section_id: إعادة تشغيل السيدر ما لازم
+                    // تشيل الطلاب من شعبهم. التوزيع شغل StudentSectionSeeder.
                 ]
             );
         }

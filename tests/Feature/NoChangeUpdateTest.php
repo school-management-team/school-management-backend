@@ -146,4 +146,76 @@ class NoChangeUpdateTest extends TestCase
             ->assertStatus(422)
             ->assertJsonPath('message', 'لم تُرسل أي بيانات للتعديل');
     }
+
+    // ==================== الصف والمادة ====================
+
+    public function test_resending_the_same_class_values_reports_no_change(): void
+    {
+        $class = \App\Models\SchoolClass::find($this->section->class_id);
+
+        $this->asSupervisor()
+            ->putJson("/api/supervisor/classes/{$class->id}", [
+                'name' => $class->name,
+                'grade_order' => $class->grade_order,
+                'stage_id' => $class->stage_id,
+            ])
+            ->assertOk()
+            ->assertJsonPath('changed', false)
+            ->assertJsonPath('message', 'لم يطرأ أي تغيير — القيم المرسلة مطابقة للمحفوظة');
+
+        $this->assertEquals($class->updated_at, $class->fresh()->updated_at);
+    }
+
+    public function test_a_real_class_change_is_reported(): void
+    {
+        $class = \App\Models\SchoolClass::find($this->section->class_id);
+
+        $this->asSupervisor()
+            ->putJson("/api/supervisor/classes/{$class->id}", ['name' => 'الصف الأول المعدّل'])
+            ->assertOk()
+            ->assertJsonPath('changed', true)
+            ->assertJsonPath('changed_fields', ['name']);
+
+        $this->assertSame('الصف الأول المعدّل', $class->fresh()->name);
+    }
+
+    public function test_resending_the_same_subject_values_reports_no_change(): void
+    {
+        $this->asSupervisor()
+            ->putJson("/api/supervisor/subjects/{$this->subject->id}", [
+                'name' => $this->subject->name,
+                'passing_grade' => $this->subject->passing_grade,
+            ])
+            ->assertOk()
+            ->assertJsonPath('changed', false);
+    }
+
+    public function test_resending_the_same_stage_links_reports_no_change(): void
+    {
+        // المراحل علاقة منفصلة — مزامنة بنفس القائمة مش تعديل
+        $stageIds = $this->subject->stages()->pluck('stages.id')->all();
+
+        $this->asSupervisor()
+            ->putJson("/api/supervisor/subjects/{$this->subject->id}", [
+                'stage_ids' => array_reverse($stageIds),   // نفس المجموعة بترتيب مقلوب
+            ])
+            ->assertOk()
+            ->assertJsonPath('changed', false);
+    }
+
+    public function test_changing_the_stage_links_is_reported(): void
+    {
+        $middle = $this->makeStage('middle');
+        $this->subject->stages()->sync([]);
+
+        $this->asSupervisor()
+            ->putJson("/api/supervisor/subjects/{$this->subject->id}", [
+                'stage_ids' => [$middle->id],
+            ])
+            ->assertOk()
+            ->assertJsonPath('changed', true)
+            ->assertJsonPath('changed_fields', ['stages']);
+
+        $this->assertSame(1, $this->subject->stages()->count());
+    }
 }

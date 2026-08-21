@@ -94,17 +94,51 @@ class StudentSectionController extends Controller
                 ];
             }
 
+            /*
+             | الرسالة لازم تعكس اللي صار فعلاً.
+             |
+             | لما يكون كل الطلاب موزّعين مسبقاً، ما بينوزّع ولا واحد —
+             | فما بصير نقول "تم التوزيع بنجاح" ونحنا ما لمسنا ولا صف.
+             */
+            $assignedCount = count($assigned);
+            $unassignedCount = count($unassigned);
+            $totalSeats = 0;
+            $takenSeats = 0;
+
+            foreach ($sectionSummaries as $summary) {
+                $totalSeats += $summary['capacity'];
+                $takenSeats += $summary['current_count'];
+            }
+
+            if ($assignedCount === 0 && $unassignedCount === 0) {
+                $message = $reset
+                    ? 'لا يوجد طلاب في هذا الصف لإعادة توزيعهم'
+                    : 'جميع طلاب هذا الصف موزّعون على الشعب مسبقاً';
+            } elseif ($assignedCount === 0) {
+                $message = "لم يُوزَّع أي طالب — لا توجد مقاعد شاغرة، وبقي {$unassignedCount} طالب بلا شعبة";
+            } else {
+                $message = $reset
+                    ? "تم إعادة توزيع {$assignedCount} طالب"
+                    : "تم توزيع {$assignedCount} طالب";
+
+                if ($unassignedCount > 0) {
+                    $message .= "، وبقي {$unassignedCount} بلا شعبة لامتلاء المقاعد";
+                }
+            }
+
             return response()->json([
                 'success' => true,
-                'message' => $reset
-                    ? 'تمت إعادة توزيع الطلاب بنجاح'
-                    : 'تم توزيع الطلاب على الشعب بنجاح',
+                'message' => $message,
+                'changed' => $assignedCount > 0,
                 'data' => [
                     'sections' => $sectionSummaries,
                     'assigned' => $assigned,
                     'unassigned' => $unassigned,
-                    'assigned_count' => count($assigned),
-                    'unassigned_count' => count($unassigned),
+                    'assigned_count' => $assignedCount,
+                    'unassigned_count' => $unassignedCount,
+                    'total_capacity' => $totalSeats,
+                    'total_students' => $takenSeats,
+                    'available_slots' => max(0, $totalSeats - $takenSeats),
                 ],
             ]);
         });
@@ -214,25 +248,65 @@ public function transfer(Request $request)
         ], 422);
     }
 
-    return DB::transaction(function () use ($toTransfer, $targetSection) {
+    // الطلاب اللي أصلاً بالشعبة الهدف — ما بينقلوا، بس لازم نذكرهم بالرد
+    $alreadyThere = $students->where('section_id', $targetSection->id);
+
+    return DB::transaction(function () use ($toTransfer, $alreadyThere, $targetSection, $students) {
         $updated = [];
 
         foreach ($toTransfer as $student) {
+            $from = $student->section_id;
+
             $student->section_id = $targetSection->id;
             $student->save();
 
             $updated[] = [
                 'student_id' => $student->id,
                 'student_number' => $student->student_number,
+                'from_section_id' => $from,
                 'new_section_id' => $targetSection->id,
                 'new_section_name' => $targetSection->name,
             ];
         }
 
+        $movedCount = count($updated);
+        $skippedCount = $alreadyThere->count();
+
+        /*
+         | الرسالة لازم تعكس اللي صار.
+         | نقل طالب لشعبة هو فيها أصلاً = ما في نقل، فما بصير نقول "تم النقل".
+         */
+        if ($movedCount === 0) {
+            $message = $skippedCount === 1
+                ? 'الطالب موجود في هذه الشعبة مسبقاً، لم يتم نقل أحد'
+                : "الطلاب ({$skippedCount}) موجودون في هذه الشعبة مسبقاً، لم يتم نقل أحد";
+        } else {
+            $message = "تم نقل {$movedCount} طالب إلى شعبة {$targetSection->name}";
+
+            if ($skippedCount > 0) {
+                $message .= "، و{$skippedCount} كانوا فيها مسبقاً";
+            }
+        }
+
+        $currentCount = Student::where('section_id', $targetSection->id)->count();
+
         return response()->json([
             'success' => true,
-            'message' => 'تم نقل الطلاب بنجاح',
-            'data' => $updated,
+            'message' => $message,
+            'changed' => $movedCount > 0,
+            'data' => [
+                'transferred' => $updated,
+                'transferred_count' => $movedCount,
+                'already_there_count' => $skippedCount,
+                'requested_count' => $students->count(),
+                'target_section' => [
+                    'id' => $targetSection->id,
+                    'name' => $targetSection->name,
+                    'capacity' => $targetSection->capacity,
+                    'current_count' => $currentCount,
+                    'available_slots' => max(0, $targetSection->capacity - $currentCount),
+                ],
+            ],
         ]);
     });
 }

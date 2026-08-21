@@ -135,7 +135,38 @@ class ExistingRolesRegressionTest extends TestCase
         ]);
     }
 
-    public function test_grades_are_locked_after_submission(): void
+    public function test_grades_stay_editable_until_the_admin_approves(): void
+    {
+        // الرفع التلقائي بيصير لما تكتمل المكوّنات، بس القفل بيصير بالاعتماد
+        foreach (['participation', 'quiz', 'exam'] as $type) {
+            $this->asTeacher()->postJson("/api/teacher/sections/{$this->mathAssignment->id}/grades", [
+                'type' => $type,
+                'semester' => 1,
+                'grades' => [
+                    ['student_id' => $this->studentA->id, 'value' => 80],
+                    ['student_id' => $this->studentB->id, 'value' => 60],
+                ],
+            ])->assertOk();
+        }
+
+        $this->assertDatabaseHas('grade_submissions', [
+            'section_id' => $this->section->id,
+            'subject_id' => $this->math->id,
+            'status' => 'submitted',
+        ]);
+
+        // مرفوع بس مش معتمد → التعديل لسا مسموح
+        $this->asTeacher()->postJson('/api/teacher/grades', [
+            'subject_id' => $this->math->id,
+            'section_id' => $this->section->id,
+            'student_id' => $this->studentA->id,
+            'type' => 'quiz',
+            'semester' => 1,
+            'value' => 99,
+        ])->assertCreated();
+    }
+
+    public function test_grades_are_locked_after_approval(): void
     {
         foreach (['participation', 'quiz', 'exam'] as $type) {
             $this->asTeacher()->postJson("/api/teacher/sections/{$this->mathAssignment->id}/grades", [
@@ -148,7 +179,13 @@ class ExistingRolesRegressionTest extends TestCase
             ])->assertOk();
         }
 
-        // بعد الرفع التلقائي ما بينفع تعديل
+        $submission = GradeSubmission::where('subject_id', $this->math->id)->first();
+
+        $this->asAdmin()
+            ->postJson("/api/admin/grade-submissions/{$submission->id}/approve")
+            ->assertOk();
+
+        // بعد الاعتماد ما بيقدر يعدّل
         $this->asTeacher()->postJson('/api/teacher/grades', [
             'subject_id' => $this->math->id,
             'section_id' => $this->section->id,

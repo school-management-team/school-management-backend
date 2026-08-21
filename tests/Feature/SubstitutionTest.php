@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Models\LessonSubstitution;
+use App\Models\Stage;
+use App\Models\Subject;
 use App\Models\TeacherAttendance;
 use App\Models\WeeklySchedule;
 use Carbon\Carbon;
@@ -507,6 +509,73 @@ class SubstitutionTest extends TestCase
             ->assertJsonPath('data.date_day', 'monday');
     }
 
+    public function test_omitting_the_date_falls_back_to_the_lesson_own_day(): void
+    {
+        /*
+         | الحصة يوم أحد. لو ما بعتنا تاريخ، ما بصير ناخد تاريخ اليوم
+         | ونرفض الطلب لأنه ما وافق — منحسب أقرب أحد لحالنا.
+         */
+        $date = $this->actingAsSupervisor()->getJson(
+            "/api/supervisor/substitutions/available-teachers?weekly_schedule_id={$this->absentMathLesson->id}"
+        )
+            ->assertOk()
+            ->json('data.date');
+
+        $this->assertSame('sunday', strtolower(\Carbon\Carbon::parse($date)->format('l')));
+    }
+
+    public function test_the_mismatch_suggests_the_right_dates(): void
+    {
+        $this->recordAttendance();
+
+        // ما بيكفي نقول "غلط" — لازم يقترح التواريخ الصحيحة
+        $data = $this->actingAsSupervisor()->getJson(
+            "/api/supervisor/substitutions/available-teachers?weekly_schedule_id={$this->absentMathLesson->id}&date=2026-08-18"
+        )
+            ->assertStatus(422)
+            ->json('data');
+
+        // 2026-08-18 ثلاثاء → الأحد التالي 23 والسابق 16
+        $this->assertSame('2026-08-23', $data['suggested_dates']['next']);
+        $this->assertSame('2026-08-16', $data['suggested_dates']['previous']);
+    }
+
+    public function test_the_mismatch_message_uses_arabic_day_names(): void
+    {
+        $this->recordAttendance();
+
+        $response = $this->actingAsSupervisor()->getJson(
+            "/api/supervisor/substitutions/available-teachers?weekly_schedule_id={$this->absentMathLesson->id}&date=2026-08-18"
+        )->assertStatus(422);
+
+        $message = $response->json('message');
+
+        $this->assertStringContainsString('الأحد', $message);
+        $this->assertStringContainsString('الثلاثاء', $message);
+        $this->assertStringNotContainsString('sunday', $message);
+        $this->assertStringNotContainsString('tuesday', $message);
+
+        $this->assertSame('الأحد', $response->json('data.lesson_day_label'));
+        $this->assertSame('الثلاثاء', $response->json('data.date_day_label'));
+
+        // الأسماء الإنجليزية بتضل بالـ data للاستعمال البرمجي
+        $this->assertSame('sunday', $response->json('data.lesson_day'));
+    }
+
+    public function test_the_suggested_date_actually_works(): void
+    {
+        $this->recordAttendance();
+
+        $suggested = $this->actingAsSupervisor()->getJson(
+            "/api/supervisor/substitutions/available-teachers?weekly_schedule_id={$this->absentMathLesson->id}&date=2026-08-18"
+        )->json('data.suggested_dates.previous');
+
+        // التاريخ المقترح لازم يمرق — هاد كل معنى الاقتراح
+        $this->actingAsSupervisor()->getJson(
+            "/api/supervisor/substitutions/available-teachers?weekly_schedule_id={$this->absentMathLesson->id}&date={$suggested}"
+        )->assertOk();
+    }
+
     public function test_a_missing_lesson_id_is_rejected(): void
     {
         $this->actingAsSupervisor()->getJson(
@@ -604,5 +673,203 @@ class SubstitutionTest extends TestCase
             $response->json('data.total_available'),
             $response->json('data.available_teachers')
         );
+    }
+
+    // ==================== قيد المرحلة ====================
+
+    /** بيسجّل معلم إضافي حاضر، حتى يدخل بحسبة المرشحين */
+    private function markPresent(int $teacherId): void
+    {
+        TeacherAttendance::create([
+            'teacher_id' => $teacherId,
+            'date' => $this->date,
+            'status' => 'present',
+            'supervisor_id' => $this->supervisor->id,
+        ]);
+    }
+
+    public function test_a_free_teacher_from_another_stage_is_not_offered(): void
+    {
+        $this->recordAttendance();
+
+        // أستاذ رياضيات فاضي تماماً — بس مرحلته إعدادي والحصة ابتدائي
+        $middle = $this->makeStage('middle');
+        $outsider = $this->makeTeacher(
+            Subject::where('name', 'رياضيات')->first(),
+            $middle,
+            'Middle Math'
+        );
+        $this->markPresent($outsider->id);
+
+        $data = $this->actingAsSupervisor()->getJson(
+            "/api/supervisor/substitutions/available-teachers?weekly_schedule_id={$this->absentMathLesson->id}&date={$this->date}"
+        )->assertOk()->json('data');
+
+        $ids = array_column($data['available_teachers'], 'teacher_id');
+
+        $this->assertNotContains($outsider->id, $ids);
+        $this->assertSame(1, $data['excluded']['other_stage']);
+    }
+
+    public function test_a_teacher_whose_subject_is_not_taught_in_the_stage_is_not_offered(): void
+    {
+        $this->recordAttendance();
+
+        /*
+         | أستاذ بنفس المرحلة، بس مادته مو مدرَّسة فيها — متل أستاذ تاريخ
+         | بالابتدائي. ما بينفع يعوّض حتى لو كان فاضي.
+         */
+        $notTaught = Subject::create([
+            'name' => 'التاريخ',
+            'passing_grade' => 50,
+            'description' => 'مادة غير مرتبطة بهذه المرحلة',
+        ]);
+
+        $stage = Stage::where('name', 'primary')->first();
+        $stranger = $this->makeTeacher($notTaught, $stage, 'History');
+        $this->markPresent($stranger->id);
+
+        $data = $this->actingAsSupervisor()->getJson(
+            "/api/supervisor/substitutions/available-teachers?weekly_schedule_id={$this->absentMathLesson->id}&date={$this->date}"
+        )->assertOk()->json('data');
+
+        $ids = array_column($data['available_teachers'], 'teacher_id');
+
+        $this->assertNotContains($stranger->id, $ids);
+        $this->assertSame(1, $data['excluded']['subject_not_in_stage']);
+    }
+
+    public function test_same_subject_teachers_come_first(): void
+    {
+        $this->recordAttendance();
+
+        $teachers = $this->actingAsSupervisor()->getJson(
+            "/api/supervisor/substitutions/available-teachers?weekly_schedule_id={$this->absentMathLesson->id}&date={$this->date}"
+        )->assertOk()->json('data.available_teachers');
+
+        // أول واحد لازم يكون رياضيات، مو عربي
+        $this->assertTrue($teachers[0]['same_subject']);
+        $this->assertSame($this->freeMathTeacher->id, $teachers[0]['teacher_id']);
+
+        // وبعدها يجي معلمي المرحلة من مواد تانية
+        $last = end($teachers);
+        $this->assertFalse($last['same_subject']);
+    }
+
+    public function test_the_response_names_the_stage_of_the_lesson(): void
+    {
+        $this->recordAttendance();
+
+        $this->actingAsSupervisor()->getJson(
+            "/api/supervisor/substitutions/available-teachers?weekly_schedule_id={$this->absentMathLesson->id}&date={$this->date}"
+        )
+            ->assertOk()
+            ->assertJsonPath('data.stage', 'primary')
+            ->assertJsonPath('data.lesson.stage', 'primary');
+    }
+
+    public function test_the_message_mentions_the_excluded_teachers(): void
+    {
+        $this->recordAttendance();
+
+        $middle = $this->makeStage('middle');
+        $outsider = $this->makeTeacher(
+            Subject::where('name', 'رياضيات')->first(),
+            $middle,
+            'Middle Math'
+        );
+        $this->markPresent($outsider->id);
+
+        // ما بيكفي نخفيه بصمت — لازم نقول إنو في حدا فاضي بس مستبعد وليش
+        $message = $this->actingAsSupervisor()->getJson(
+            "/api/supervisor/substitutions/available-teachers?weekly_schedule_id={$this->absentMathLesson->id}&date={$this->date}"
+        )->assertOk()->json('message');
+
+        $this->assertStringContainsString('استُبعد', $message);
+        $this->assertStringContainsString('primary', $message);
+    }
+
+    public function test_assigning_a_teacher_from_another_stage_is_rejected(): void
+    {
+        $this->recordAttendance();
+
+        // القائمة بتفلتره، بس لازم التعيين المباشر كمان يرفضه
+        $middle = $this->makeStage('middle');
+        $outsider = $this->makeTeacher(
+            Subject::where('name', 'رياضيات')->first(),
+            $middle,
+            'Middle Math'
+        );
+        $this->markPresent($outsider->id);
+
+        $this->assign($outsider->id)
+            ->assertStatus(422)
+            ->assertJsonPath('success', false);
+
+        $this->assertDatabaseCount('lesson_substitutions', 0);
+    }
+
+    public function test_assigning_a_teacher_whose_subject_is_not_in_the_stage_is_rejected(): void
+    {
+        $this->recordAttendance();
+
+        $notTaught = Subject::create([
+            'name' => 'التاريخ',
+            'passing_grade' => 50,
+            'description' => 'مادة غير مرتبطة بهذه المرحلة',
+        ]);
+
+        $stage = Stage::where('name', 'primary')->first();
+        $stranger = $this->makeTeacher($notTaught, $stage, 'History');
+        $this->markPresent($stranger->id);
+
+        $response = $this->assign($stranger->id)->assertStatus(422);
+
+        $this->assertStringContainsString('غير مدرَّسة', $response->json('message'));
+        $this->assertDatabaseCount('lesson_substitutions', 0);
+    }
+
+    public function test_assigning_with_a_date_that_misses_the_lesson_day_explains_why(): void
+    {
+        $this->recordAttendance();
+
+        /*
+         | الغلط الشائع: المستخدم بياخد رقم حصة من طلب قديم وبيلزقه بتاريخ
+         | تاني. الرفض صح، بس لازم يقول ليش ويعطي البديل — مش جملة صمّاء.
+         */
+        $response = $this->actingAsSupervisor()->postJson('/api/supervisor/substitutions', [
+            'weekly_schedule_id' => $this->absentMathLesson->id,   // أحد
+            'substitute_teacher_id' => $this->freeMathTeacher->id,
+            'date' => '2026-08-18',                                 // ثلاثاء
+        ])->assertStatus(422);
+
+        $message = $response->json('message');
+
+        $this->assertStringContainsString('الأحد', $message);
+        $this->assertStringContainsString('الثلاثاء', $message);
+        $this->assertStringContainsString('absent-lessons', $message);
+
+        $this->assertSame('2026-08-23', $response->json('data.suggested_dates.next'));
+        $this->assertSame($this->absentMathLesson->id, $response->json('data.weekly_schedule_id'));
+
+        $this->assertDatabaseCount('lesson_substitutions', 0);
+    }
+
+    public function test_both_endpoints_reject_a_wrong_date_the_same_way(): void
+    {
+        $this->recordAttendance();
+
+        // نفس المشكلة لازم تعطي نفس الشرح، سواء بالبحث أو بالتعيين
+        $fromSearch = $this->actingAsSupervisor()->getJson(
+            "/api/supervisor/substitutions/available-teachers?weekly_schedule_id={$this->absentMathLesson->id}&date=2026-08-18"
+        )->assertStatus(422)->json('data.suggested_dates');
+
+        $fromAssign = $this->actingAsSupervisor()->postJson('/api/supervisor/substitutions', [
+            'weekly_schedule_id' => $this->absentMathLesson->id,
+            'substitute_teacher_id' => $this->freeMathTeacher->id,
+            'date' => '2026-08-18',
+        ])->assertStatus(422)->json('data.suggested_dates');
+
+        $this->assertSame($fromSearch, $fromAssign);
     }
 }

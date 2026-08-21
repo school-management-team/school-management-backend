@@ -274,7 +274,69 @@ class TeacherAssignmentTest extends TestCase
         $this->assertSame(2, WeeklySchedule::count());
     }
 
-    public function test_forcing_the_delete_removes_the_lessons_too(): void
+    public function test_the_warning_explains_why_the_lessons_go(): void
+    {
+        $this->link()->assertCreated();
+        $assignment = TeacherAssignment::first();
+        $this->scheduleLesson($assignment, 1);
+
+        $response = $this->asSupervisor()
+            ->deleteJson("/api/supervisor/teacher-assignments/{$assignment->id}")
+            ->assertStatus(409);
+
+        $message = $response->json('message');
+
+        // السبب: المادة بتنقرأ من التكليف
+        $this->assertStringContainsString('مادة الحصة تُقرأ من التكليف', $message);
+        $this->assertStringContainsString('خاناتها فارغة', $message);
+
+        // والبديل الصحيح لتبديل المعلم
+        $this->assertStringContainsString('PUT', $message);
+    }
+
+    public function test_the_warning_lists_what_survives(): void
+    {
+        $this->link()->assertCreated();
+        $assignment = TeacherAssignment::first();
+        $this->scheduleLesson($assignment, 1);
+
+        $data = $this->asSupervisor()
+            ->deleteJson("/api/supervisor/teacher-assignments/{$assignment->id}")
+            ->assertStatus(409)
+            ->json('data');
+
+        $this->assertContains('العلامات', $data['preserved']);
+        $this->assertContains('المعلم', $data['preserved']);
+        $this->assertContains('المادة', $data['preserved']);
+
+        $this->assertSame('أستاذ الرياضيات', $data['assignment']['teacher']);
+        $this->assertSame('رياضيات', $data['assignment']['subject']);
+        $this->assertStringContainsString('teacher-assignments/'.$assignment->id, $data['alternative']);
+    }
+
+    public function test_swapping_the_teacher_keeps_the_lessons(): void
+    {
+        // الطريقة الصحيحة لتبديل المعلم بدون خسارة الجدول
+        $this->link()->assertCreated();
+        $assignment = TeacherAssignment::first();
+
+        $this->scheduleLesson($assignment, 1);
+        $this->scheduleLesson($assignment, 2);
+
+        $newTeacher = $this->makeTeacher($this->math, $this->makeStage(), 'أستاذ بديل');
+
+        $this->asSupervisor()
+            ->putJson("/api/supervisor/teacher-assignments/{$assignment->id}", [
+                'teacher_id' => $newTeacher->id,
+            ])
+            ->assertOk();
+
+        // الحصص بمكانها، وبس صاحبها تغيّر
+        $this->assertSame(2, WeeklySchedule::count());
+        $this->assertSame($newTeacher->id, $assignment->fresh()->teacher_id);
+    }
+
+    public function test_repeating_the_request_confirms_the_delete(): void
     {
         $this->link()->assertCreated();
         $assignment = TeacherAssignment::first();
@@ -282,8 +344,17 @@ class TeacherAssignmentTest extends TestCase
         $this->scheduleLesson($assignment, 1);
         $this->scheduleLesson($assignment, 2);
 
-        $this->asSupervisor()
-            ->deleteJson("/api/supervisor/teacher-assignments/{$assignment->id}?force=1")
+        $url = "/api/supervisor/teacher-assignments/{$assignment->id}";
+
+        // الطلب الأول: تحذير
+        $this->asSupervisor()->deleteJson($url)
+            ->assertStatus(409)
+            ->assertJsonPath('requires_confirmation', true);
+
+        $this->assertSame(1, TeacherAssignment::count());
+
+        // نفس الطلب مرة تانية: ينفّذ
+        $this->asSupervisor()->deleteJson($url)
             ->assertOk()
             ->assertJsonPath('data.deleted_lessons', 2);
 
@@ -291,6 +362,56 @@ class TeacherAssignmentTest extends TestCase
 
         // ما بتضل حصص يتيمة محجوزة بالجدول بلا مادة
         $this->assertSame(0, WeeklySchedule::count());
+    }
+
+    public function test_an_assignment_without_lessons_deletes_immediately(): void
+    {
+        // ما في شي رح يضيع، فما بدّو تأكيد
+        $this->link()->assertCreated();
+        $assignment = TeacherAssignment::first();
+
+        $this->asSupervisor()
+            ->deleteJson("/api/supervisor/teacher-assignments/{$assignment->id}")
+            ->assertOk()
+            ->assertJsonPath('data.deleted_lessons', 0);
+
+        $this->assertSame(0, TeacherAssignment::count());
+    }
+
+    public function test_the_confirmation_belongs_to_one_supervisor_only(): void
+    {
+        $this->link()->assertCreated();
+        $assignment = TeacherAssignment::first();
+        $this->scheduleLesson($assignment, 1);
+
+        $url = "/api/supervisor/teacher-assignments/{$assignment->id}";
+
+        // موجّه أول بيشوف التحذير
+        $this->asSupervisor()->deleteJson($url)->assertStatus(409);
+
+        // موجّه تاني لازم يشوف التحذير هو كمان، مش يستفيد من تأكيد غيره
+        $other = $this->makeSupervisor();
+
+        $this->actingAs($other->user, 'sanctum')
+            ->deleteJson($url)
+            ->assertStatus(409);
+
+        $this->assertSame(1, TeacherAssignment::count());
+    }
+
+    public function test_the_warning_mentions_repeating_the_request(): void
+    {
+        $this->link()->assertCreated();
+        $assignment = TeacherAssignment::first();
+        $this->scheduleLesson($assignment, 1);
+
+        $message = $this->asSupervisor()
+            ->deleteJson("/api/supervisor/teacher-assignments/{$assignment->id}")
+            ->assertStatus(409)
+            ->json('message');
+
+        $this->assertStringContainsString('أعد إرسال الطلب نفسه', $message);
+        $this->assertStringNotContainsString('force', $message);
     }
 
     public function test_deleting_an_assignment_does_not_delete_the_grades(): void

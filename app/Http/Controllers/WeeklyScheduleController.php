@@ -3,15 +3,24 @@
 namespace App\Http\Controllers;
 
 use App\Models\Section;
+use App\Models\Subject;
 use App\Models\Teacher;
 use App\Models\TeacherAssignment;
 use App\Models\WeeklySchedule;
+use App\Services\SchoolCalendarService;
 use App\Services\WeeklyScheduleService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class WeeklyScheduleController extends Controller
 {
+    protected $calendarService;
+
+    public function __construct(SchoolCalendarService $calendarService)
+    {
+        $this->calendarService = $calendarService;
+    }
+
     /** تعريف الحصص وأيام الدوام — تتعبّى فيها الواجهة شبكة الجدول */
     public function periods()
     {
@@ -154,14 +163,24 @@ class WeeklyScheduleController extends Controller
 
         $day = $validated['day_of_week'];
         $periodNumber = $validated['period_number'];
+        $period = $this->classPeriod($periodNumber);
 
-        $query = Teacher::with('user:id,user_name', 'subject:id,name');
+        // كم معلم منفحص أصلاً؟ (بعد فلتر المادة إن وُجد) — لازمنا للرسالة
+        $pool = Teacher::query();
+
+        if ($request->filled('subject_id')) {
+            $pool->where('subject_id', $request->subject_id);
+        }
+
+        $poolCount = $pool->count();
+
+        $query = Teacher::with('user:id,user_name', 'subject:id,name', 'stage:id,name');
 
         if ($request->filled('subject_id')) {
             $query->where('subject_id', $request->subject_id);
         }
 
-        // المعلم الفاضي = ما عندو ولا حصة بهاليوم وهالرقم
+        // المعلم الفاضي = ما عندو ولا حصة بهاليوم وهالرقم بالجدول الأسبوعي
         $query->whereDoesntHave('weeklySchedules', function ($schedule) use ($day, $periodNumber) {
             $schedule->where('day_of_week', $day)->where('period_number', $periodNumber);
         });
@@ -175,22 +194,42 @@ class WeeklyScheduleController extends Controller
                 'teacher_id' => $teacher->id,
                 'teacher_name' => $teacher->user ? $teacher->user->user_name : null,
                 'subject' => $teacher->subject ? $teacher->subject->name : null,
+                'stage' => $teacher->stage ? $teacher->stage->name : null,
                 'weekly_lessons_count' => $teacher->weekly_schedules_count,
             ];
         }
 
-        // الأقل نصاباً أولاً
+        // الأقل نصاباً أولاً — حتى ينوزّع العبء بالعدل وقت بناء الجدول
         usort($teachers, function ($a, $b) {
             return $a['weekly_lessons_count'] - $b['weekly_lessons_count'];
         });
 
+        $free = count($teachers);
+        $busy = $poolCount - $free;
+        $dayLabel = $this->calendarService->dayLabel($day);
+        $scope = $request->filled('subject_id') ? 'معلمي هذه المادة' : 'المعلمين';
+
+        if ($poolCount === 0) {
+            $message = 'لا يوجد معلمون مطابقون للفلتر المُرسل';
+        } elseif ($free === 0) {
+            $message = "كل {$scope} ({$poolCount}) عندهم حصة يوم {$dayLabel} بالحصة {$periodNumber}";
+        } else {
+            $message = "من أصل {$poolCount} من {$scope}، {$free} فاضي يوم {$dayLabel} بالحصة {$periodNumber}";
+        }
+
         return response()->json([
             'success' => true,
+            'message' => $message,
             'data' => [
                 'day_of_week' => $day,
+                'day_label' => $dayLabel,
                 'period_number' => $periodNumber,
+                'starts_at' => $period['start'],
+                'ends_at' => $period['end'],
                 'free_teachers' => $teachers,
-                'total' => count($teachers),
+                'total' => $free,
+                'busy_count' => $busy,
+                'checked_count' => $poolCount,
             ],
         ]);
     }
@@ -211,6 +250,13 @@ class WeeklyScheduleController extends Controller
         }
 
         $assignment = TeacherAssignment::findOrFail($validated['teacher_assignment_id']);
+
+        // التكليف نفسه صالح؟ (المادة مقررة بالمرحلة، ومرحلة المعلم تطابق)
+        $invalid = $this->invalidAssignment($assignment);
+
+        if ($invalid) {
+            return $invalid;
+        }
 
         return DB::transaction(function () use ($assignment, $validated, $period) {
             $conflicts = $this->conflicts(
@@ -288,6 +334,21 @@ class WeeklyScheduleController extends Controller
             }
 
             $assignment = $assignments->get($item['teacher_assignment_id']);
+
+            // التكليف نفسه صالح؟ (المادة مقررة بالمرحلة)
+            $invalid = $this->invalidAssignment($assignment);
+
+            if ($invalid) {
+                $body = $invalid->getData(true);
+
+                $errors[] = [
+                    'index' => $index,
+                    'reason' => $body['message'],
+                    'assignment_id' => $assignment->id,
+                ];
+                continue;
+            }
+
             $day = $item['day_of_week'];
             $slot = $day.'-'.$item['period_number'];
             $teacherSlot = $assignment->teacher_id.'-'.$slot;
@@ -404,6 +465,12 @@ class WeeklyScheduleController extends Controller
             ], 422);
         }
 
+        $invalid = $this->invalidAssignment($assignment);
+
+        if ($invalid) {
+            return $invalid;
+        }
+
         return DB::transaction(function () use ($schedule, $assignment, $day, $periodNumber, $period) {
             $conflicts = $this->conflicts(
                 $assignment->teacher_id,
@@ -453,6 +520,534 @@ class WeeklyScheduleController extends Controller
     }
 
     // ==================== أدوات داخلية ====================
+
+    /**
+     * التكليف نفسه صالح؟
+     *
+     * التكليف المفروض يكون انفحص وقت إنشائه، بس تكاليف قديمة (أو مزروعة)
+     * ممكن تكون خالفت القاعدة قبل ما تنضاف. فمنفحص هون كمان قبل ما نبني
+     * عليها جدولاً — أرخص من اكتشاف "التاريخ لصف ابتدائي" بعد النشر.
+     *
+     * بيرجّع استجابة رفض إذا في مخالفة، وإلا null.
+     */
+    /**
+     * الخانات الفاضية لتكليف معيّن — وين فيك تحط هالحصة.
+     * GET /supervisor/schedule/free-slots?teacher_assignment_id=2
+     *
+     * بدونها بتضطر تحزّر خانة خانة وتاكل رفض تعارض كل مرة. هون بتاخد
+     * القائمة الجاهزة وبتختار منها، وبترسلها متل ما هي على POST /schedule.
+     */
+    /**
+     * بناء جدول شعبة يوم بيوم — الراوت الوحيد يلي بتحتاجه.
+     * POST /supervisor/schedule/build/{section}
+     *
+     * بتبعت الشعبة، وحصص اليوم بالمادة والمعلم. التكليف بينعمل لحالو إذا
+     * مش موجود، فما بتحتاج تنشئ تكليفات ولا تجيب أرقامها.
+     *
+     * {
+     *   "days": {
+     *     "sunday": [
+     *       { "period_number": 1, "subject_id": 1, "teacher_id": 1 },
+     *       { "period_number": 2, "subject_id": 3, "teacher_id": 4 }
+     *     ]
+     *   }
+     * }
+     *
+     * فيك تبعت يوم واحد وترجع تبعت التاني، أو الأسبوع كله بطلب واحد.
+     * الرد بيقلك كم ضلّ وأي يوم التالي.
+     */
+    public function buildWeek(Request $request, Section $section)
+    {
+        $days = implode(',', config('school.school_days'));
+
+        $validated = $request->validate([
+            'days' => 'required|array|min:1',
+            'days.*' => 'required|array|min:1',
+            'days.*.*.period_number' => 'required|integer',
+            'days.*.*.subject_id' => 'required|exists:subjects,id',
+            'days.*.*.teacher_id' => 'required|exists:teachers,id',
+        ]);
+
+        foreach (array_keys($validated['days']) as $day) {
+            if (!in_array($day, config('school.school_days'))) {
+                return response()->json([
+                    'success' => false,
+                    'message' => "اليوم ({$day}) مش من أيام الدوام. الأيام المسموحة: {$days}",
+                ], 422);
+            }
+        }
+
+        $section->load('schoolClass.stage');
+
+        $class = $section->schoolClass;
+        $stage = $class ? $class->stage : null;
+
+        if (!$stage) {
+            return response()->json([
+                'success' => false,
+                'message' => 'هذه الشعبة غير مرتبطة بصف له مرحلة دراسية',
+            ], 422);
+        }
+
+        // مواد المرحلة ومعلميها — منجيبهن مرة وحدة بدل ما نسأل كل حصة
+        $stageSubjectIds = $stage->subjects()->pluck('subjects.id')->all();
+        $stageTeachers = Teacher::with('user:id,user_name', 'subject:id,name')
+            ->where('stage_id', $stage->id)
+            ->get()
+            ->keyBy('id');
+
+        $errors = [];
+        $planned = [];
+        $takenInRequest = [];
+
+        foreach ($validated['days'] as $day => $lessons) {
+            foreach ($lessons as $index => $lesson) {
+                $error = $this->checkPlannedLesson(
+                    $lesson,
+                    $day,
+                    $section,
+                    $stage,
+                    $stageSubjectIds,
+                    $stageTeachers,
+                    $takenInRequest
+                );
+
+                if ($error) {
+                    $errors[] = array_merge(['day' => $day, 'index' => $index], $error);
+                    continue;
+                }
+
+                $slot = $day.'-'.$lesson['period_number'];
+
+                $takenInRequest['section-'.$slot] = true;
+                $takenInRequest['teacher-'.$lesson['teacher_id'].'-'.$slot] = true;
+
+                $planned[] = [
+                    'day' => $day,
+                    'period_number' => $lesson['period_number'],
+                    'subject_id' => $lesson['subject_id'],
+                    'teacher_id' => $lesson['teacher_id'],
+                ];
+            }
+        }
+
+        if ($errors) {
+            return response()->json([
+                'success' => false,
+                'message' => 'ما انحفظت ولا حصة: في '.count($errors).' مشكلة',
+                'data' => ['errors' => $errors],
+            ], 422);
+        }
+
+        $created = DB::transaction(function () use ($planned, $section) {
+            $lessons = [];
+
+            foreach ($planned as $row) {
+                // التكليف بينعمل لحالو إذا مش موجود — هي الفكرة كلها
+                $assignment = TeacherAssignment::firstOrCreate([
+                    'teacher_id' => $row['teacher_id'],
+                    'subject_id' => $row['subject_id'],
+                    'section_id' => $section->id,
+                ]);
+
+                $period = $this->classPeriod($row['period_number']);
+
+                $lessons[] = WeeklySchedule::create([
+                    'teacher_id' => $row['teacher_id'],
+                    'teacher_assignment_id' => $assignment->id,
+                    'day_of_week' => $row['day'],
+                    'period_number' => $row['period_number'],
+                    'start_time' => $period['start'],
+                    'end_time' => $period['end'],
+                    'type' => 'class',
+                ]);
+            }
+
+            return $lessons;
+        });
+
+        return $this->buildWeekReport($section, count($created));
+    }
+
+    /**
+     * فحص حصة مخطّطة قبل الحفظ. بترجّع سبب الرفض، أو null إذا سليمة.
+     * الترتيب من الأرخص للأغلى: الرقم، فالمادة، فالمعلم، فالتعارضات.
+     */
+    private function checkPlannedLesson(
+        array $lesson,
+        string $day,
+        Section $section,
+        $stage,
+        array $stageSubjectIds,
+        $stageTeachers,
+        array $takenInRequest
+    ): ?array {
+        $periodNumber = $lesson['period_number'];
+
+        if (!$this->classPeriod($periodNumber)) {
+            return ['reason' => "رقم الحصة {$periodNumber} غير صالح أو أنه وقت استراحة"];
+        }
+
+        if (!in_array($lesson['subject_id'], $stageSubjectIds)) {
+            $subject = Subject::find($lesson['subject_id']);
+            $name = $subject ? $subject->name : $lesson['subject_id'];
+
+            return ['reason' => "المادة ({$name}) غير مدرَّسة في مرحلة {$stage->name}"];
+        }
+
+        $teacher = $stageTeachers->get($lesson['teacher_id']);
+
+        if (!$teacher) {
+            $outsider = Teacher::with('stage', 'user')->find($lesson['teacher_id']);
+            $name = $outsider && $outsider->user ? $outsider->user->user_name : $lesson['teacher_id'];
+            $its = $outsider && $outsider->stage ? $outsider->stage->name : 'غير محددة';
+
+            return ['reason' => "المعلم ({$name}) من مرحلة {$its}، وهذه الشعبة من مرحلة {$stage->name}"];
+        }
+
+        $slot = $day.'-'.$periodNumber;
+
+        if (isset($takenInRequest['section-'.$slot])) {
+            return ['reason' => 'الشعبة عندها حصة تانية بنفس الخانة ضمن نفس الطلب'];
+        }
+
+        if (isset($takenInRequest['teacher-'.$lesson['teacher_id'].'-'.$slot])) {
+            $name = $teacher->user ? $teacher->user->user_name : $teacher->id;
+
+            return ['reason' => "المعلم ({$name}) محطوط مرتين بنفس الخانة ضمن نفس الطلب"];
+        }
+
+        // تعارض مع المحفوظ سابقاً: المعلم بشعبة تانية، أو الخانة معبّاية
+        $conflicts = $this->conflicts($lesson['teacher_id'], $section->id, $day, $periodNumber);
+
+        if ($conflicts) {
+            return ['reason' => 'تعارض مع الجدول المحفوظ', 'conflicts' => $conflicts];
+        }
+
+        return null;
+    }
+
+    /** حالة الجدول بعد الإضافة: كم صار، كم ضلّ، وأي يوم التالي */
+    private function buildWeekReport(Section $section, int $createdCount)
+    {
+        $saved = WeeklySchedule::whereHas('teacherAssignment', function ($q) use ($section) {
+            $q->where('section_id', $section->id);
+        })->where('type', 'class')->get();
+
+        $perDay = [];
+        $perDayCount = $this->classPeriodsPerDay();
+        $nextDay = null;
+
+        foreach (config('school.school_days') as $day) {
+            $filled = $saved->where('day_of_week', $day)->count();
+
+            $perDay[$day] = [
+                'day_label' => $this->calendarService->dayLabel($day),
+                'filled' => $filled,
+                'of' => $perDayCount,
+                'is_complete' => $filled >= $perDayCount,
+            ];
+
+            if ($nextDay === null && $filled < $perDayCount) {
+                $nextDay = $day;
+            }
+        }
+
+        $total = $this->classPeriodCount();
+        $filledTotal = $saved->count();
+        $left = $total - $filledTotal;
+
+        if ($left === 0) {
+            $message = "أضفنا {$createdCount} حصة — الجدول مكتمل ({$total})";
+        } else {
+            $nextLabel = $this->calendarService->dayLabel($nextDay);
+            $message = "أضفنا {$createdCount} حصة — ضلّ {$left}. التالي: {$nextLabel}";
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => $message,
+            'data' => [
+                'section' => [
+                    'id' => $section->id,
+                    'name' => $section->name,
+                    'class_name' => $section->schoolClass ? $section->schoolClass->name : null,
+                ],
+                'created_count' => $createdCount,
+                'days' => $perDay,
+                'next_day' => $nextDay,
+                'slots' => [
+                    'filled' => $filledTotal,
+                    'total' => $total,
+                    'empty' => $left,
+                    'is_complete' => $left === 0,
+                ],
+            ],
+        ], 201);
+    }
+
+    /** عدد حصص الدرس باليوم الواحد (بدون الاستراحة) */
+    private function classPeriodsPerDay(): int
+    {
+        $count = 0;
+
+        foreach (config('school.periods') as $period) {
+            if ($period['type'] === 'class') {
+                $count++;
+            }
+        }
+
+        return $count;
+    }
+
+    /**
+     * نقطة البداية لبناء جدول شعبة: شو مسموح، ومين متاح، وكم ضلّ.
+     * GET /supervisor/schedule/builder/{section}
+     *
+     * لما تنشئ شعبة جديدة ما بتعرف من وين تبلّش — أي مواد مسموحة لصفها،
+     * ومين المعلمين المؤهلين، وكم حصة لازم تعبّي. هي بتجمعهن بطلب واحد.
+     *
+     * المواد محصورة بمواد مرحلة الصف: شعبة بالصف الثاني ما بتشوف
+     * تاريخ ولا فيزياء لأنهن مش من مواد الابتدائي.
+     */
+    public function builder(Section $section)
+    {
+        $section->load('schoolClass.stage');
+
+        $class = $section->schoolClass;
+        $stage = $class ? $class->stage : null;
+
+        if (!$stage) {
+            return response()->json([
+                'success' => false,
+                'message' => 'هذه الشعبة غير مرتبطة بصف له مرحلة دراسية',
+            ], 422);
+        }
+
+        // معلمو هالمرحلة — المعلم بيعلّم بمرحلته حصراً
+        $stageTeachers = Teacher::with('user:id,user_name', 'subject:id,name')
+            ->where('stage_id', $stage->id)
+            ->get();
+
+        // التكليفات الموجودة لهالشعبة، مجمّعة حسب المادة
+        $existing = TeacherAssignment::with('teacher.user:id,user_name')
+            ->where('section_id', $section->id)
+            ->get()
+            ->groupBy('subject_id');
+
+        $subjects = [];
+
+        foreach ($stage->subjects as $subject) {
+            $eligible = [];
+
+            foreach ($stageTeachers as $teacher) {
+                $eligible[] = [
+                    'teacher_id' => $teacher->id,
+                    'teacher_name' => $teacher->user ? $teacher->user->user_name : null,
+                    'own_subject' => $teacher->subject ? $teacher->subject->name : null,
+                    // اختصاصه هالمادة نفسها — الأنسب، بس غيره كمان مسموح
+                    'is_specialist' => $teacher->subject_id === $subject->id,
+                ];
+            }
+
+            // الاختصاصيون أولاً
+            usort($eligible, function ($a, $b) {
+                if ($a['is_specialist'] !== $b['is_specialist']) {
+                    return $a['is_specialist'] ? -1 : 1;
+                }
+
+                return strcmp((string) $a['teacher_name'], (string) $b['teacher_name']);
+            });
+
+            $assigned = [];
+
+            foreach ($existing->get($subject->id, collect()) as $assignment) {
+                $assigned[] = [
+                    'assignment_id' => $assignment->id,
+                    'teacher_id' => $assignment->teacher_id,
+                    'teacher_name' => $assignment->teacher && $assignment->teacher->user
+                        ? $assignment->teacher->user->user_name
+                        : null,
+                ];
+            }
+
+            $subjects[] = [
+                'subject_id' => $subject->id,
+                'subject' => $subject->name,
+                'eligible_teachers' => $eligible,
+                // التكليفات الجاهزة للجدولة — هي يلي بتنبعت لـ POST /schedule
+                'assignments' => $assigned,
+                'is_assigned' => count($assigned) > 0,
+            ];
+        }
+
+        $filled = WeeklySchedule::whereHas('teacherAssignment', function ($q) use ($section) {
+            $q->where('section_id', $section->id);
+        })->where('type', 'class')->count();
+
+        $total = $this->classPeriodCount();
+
+        return response()->json([
+            'success' => true,
+            'message' => $this->builderMessage($filled, $total),
+            'data' => [
+                'section' => [
+                    'id' => $section->id,
+                    'name' => $section->name,
+                    'class_name' => $class->name,
+                    'stage' => $stage->name,
+                ],
+                'slots' => [
+                    'filled' => $filled,
+                    'total' => $total,
+                    'empty' => $total - $filled,
+                    'is_complete' => $filled >= $total,
+                ],
+                'subjects' => $subjects,
+                'subjects_count' => count($subjects),
+            ],
+        ]);
+    }
+
+    private function builderMessage(int $filled, int $total): string
+    {
+        if ($filled === 0) {
+            return "الشعبة بلا جدول: لازم تعبّي {$total} حصة";
+        }
+
+        if ($filled >= $total) {
+            return "الجدول مكتمل: {$filled} من {$total}";
+        }
+
+        $left = $total - $filled;
+
+        return "مسجّل {$filled} من {$total} — ضلّ {$left} حصة";
+    }
+
+    public function freeSlots(Request $request)
+    {
+        $validated = $request->validate([
+            'teacher_assignment_id' => 'required|exists:teacher_assignments,id',
+        ]);
+
+        $assignment = TeacherAssignment::with('subject', 'teacher.user', 'section.schoolClass')
+            ->findOrFail($validated['teacher_assignment_id']);
+
+        // نفس فحص الصلاحية يلي بالإضافة — ما في داعي نعرض خانات لتكليف مرفوض
+        $invalid = $this->invalidAssignment($assignment);
+
+        if ($invalid) {
+            return $invalid;
+        }
+
+        $free = [];
+        $taken = 0;
+
+        foreach (config('school.school_days') as $day) {
+            foreach (config('school.periods') as $number => $period) {
+                if ($period['type'] !== 'class') {
+                    continue;
+                }
+
+                $conflicts = $this->conflicts(
+                    $assignment->teacher_id,
+                    $assignment->section_id,
+                    $day,
+                    $number
+                );
+
+                if (count($conflicts) > 0) {
+                    $taken++;
+                    continue;
+                }
+
+                $free[] = [
+                    // جاهزة للنسخ مباشرة لـ POST /supervisor/schedule
+                    'teacher_assignment_id' => $assignment->id,
+                    'day_of_week' => $day,
+                    'day_label' => $this->calendarService->dayLabel($day),
+                    'period_number' => $number,
+                    'start_time' => $period['start'],
+                    'end_time' => $period['end'],
+                ];
+            }
+        }
+
+        if (count($free) === 0) {
+            $message = 'ما في خانة فاضية: كل خانات الأسبوع مشغولة إما بالمعلم أو بالشعبة';
+        } else {
+            $message = 'خانات فاضية: '.count($free).' من أصل '.(count($free) + $taken);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => $message,
+            'data' => [
+                'assignment' => [
+                    'id' => $assignment->id,
+                    'teacher_name' => $assignment->teacher && $assignment->teacher->user
+                        ? $assignment->teacher->user->user_name
+                        : null,
+                    'subject' => $assignment->subject ? $assignment->subject->name : null,
+                    'class_name' => $assignment->section && $assignment->section->schoolClass
+                        ? $assignment->section->schoolClass->name
+                        : null,
+                    'section_name' => $assignment->section ? $assignment->section->name : null,
+                ],
+                'free_slots' => $free,
+                'free_count' => count($free),
+                'taken_count' => $taken,
+            ],
+        ]);
+    }
+
+    private function invalidAssignment(TeacherAssignment $assignment)
+    {
+        $assignment->loadMissing('subject', 'teacher.stage', 'section.schoolClass.stage');
+
+        $class = $assignment->section ? $assignment->section->schoolClass : null;
+
+        if (!$class || !$class->stage_id || !$assignment->subject) {
+            return null;
+        }
+
+        $stageName = $class->stage ? $class->stage->name : '-';
+
+        // المادة مقررة بمرحلة هذا الصف؟
+        $taught = $assignment->subject->stages()->where('stages.id', $class->stage_id)->exists();
+
+        if (!$taught) {
+            return response()->json([
+                'success' => false,
+                'message' => "لا يمكن جدولة هذه الحصة: مادة ({$assignment->subject->name}) "
+                    ."غير مقررة في مرحلة ({$stageName}). التكليف رقم {$assignment->id} مخالف ويجب حذفه",
+                'data' => [
+                    'assignment_id' => $assignment->id,
+                    'subject' => $assignment->subject->name,
+                    'class_stage' => $stageName,
+                    'class_name' => $class->name,
+                ],
+            ], 422);
+        }
+
+        // ومرحلة المعلم تطابق مرحلة الصف؟
+        if ($assignment->teacher && $assignment->teacher->stage_id !== $class->stage_id) {
+            $teacherStage = $assignment->teacher->stage ? $assignment->teacher->stage->name : '-';
+
+            return response()->json([
+                'success' => false,
+                'message' => "لا يمكن جدولة هذه الحصة: مرحلة المعلم ({$teacherStage}) "
+                    ."لا تطابق مرحلة الصف ({$stageName}). التكليف رقم {$assignment->id} مخالف",
+                'data' => [
+                    'assignment_id' => $assignment->id,
+                    'teacher_stage' => $teacherStage,
+                    'class_stage' => $stageName,
+                ],
+            ], 422);
+        }
+
+        return null;
+    }
 
     /**
      * بيرجّع التعارضات بخانة معيّنة: المعلم مشغول، أو الشعبة مشغولة.
